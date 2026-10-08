@@ -11,7 +11,8 @@ use crossbeam_skiplist::SkipMap;
 /// a concurrent map essentially of `Bytes`. Keeps track of its size and when size
 /// exceeds the threshold it is written to the disk to the SSTable in a background process.
 /// The `Wal` ensures that written data is never lost due to a crash.
-pub struct MemTable {
+#[derive(Debug)]
+pub(crate) struct MemTable {
     map: Arc<SkipMap<Bytes, Bytes>>,
     // wal: Option<Wal>,
     id: usize,
