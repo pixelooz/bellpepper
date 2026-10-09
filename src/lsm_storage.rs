@@ -43,7 +43,11 @@ impl LsmStorageInner {
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        let value = self.state.read().memtable.get(key);
+        let snapshot = {
+            let guard = self.state.read();
+            guard.clone()
+        };
+        let value = snapshot.memtable.get(key);
         if value.as_ref().is_some_and(|x| x.is_empty()) {
             return Ok(None);
         }
