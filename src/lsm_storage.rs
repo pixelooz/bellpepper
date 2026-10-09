@@ -13,6 +13,8 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::mem_table::MemTable;
 
+/// Represents the state of the storage engine with the current memtable, all the imm_memtables,
+/// and the ss_tables.
 #[derive(Debug, Clone)]
 pub(crate) struct LsmStorageState {
     pub(crate) memtable: Arc<MemTable>,
@@ -30,6 +32,7 @@ impl LsmStorageState {
     }
 }
 
+/// Options for initializing the Lsm storage engine.
 #[derive(Debug, Clone)]
 pub struct LsmStorageOptions {
     /// Block size in bytes.
@@ -52,6 +55,8 @@ impl LsmStorageOptions {
     }
 }
 
+/// Represents the interface for the Lsm storage engine providing the api to access
+/// the state of storage engine and perform operations.
 #[derive(Debug)]
 pub(crate) struct LsmStorageInner {
     pub(crate) state: Arc<RwLock<Arc<LsmStorageState>>>,
@@ -62,6 +67,7 @@ pub(crate) struct LsmStorageInner {
 }
 
 impl LsmStorageInner {
+    /// Opens the storage engine at the given path with the given options.
     pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Self {
         let state = LsmStorageState::create();
         Self {
@@ -73,10 +79,13 @@ impl LsmStorageInner {
         }
     }
 
+    /// Returns the next sst_id for the requested memtable.
     pub(crate) fn next_sst_id(&self) -> usize {
         self.next_sst_id.fetch_add(1, Ordering::SeqCst)
     }
 
+    /// Puts the given key value pair in the memtable and attempts to freeze the table if
+    /// size exceeds the threshold.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         self.state.read().memtable.put(key, value)?;
         let approx_size = self.state.read().memtable.approximate_size();
@@ -84,6 +93,7 @@ impl LsmStorageInner {
         Ok(())
     }
 
+    /// Returns the value for the given key as Some(x) or None if not present.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let snapshot = {
             let guard = self.state.read();
@@ -96,10 +106,13 @@ impl LsmStorageInner {
         Ok(value)
     }
 
+    /// Logically deletes the value for the given key by "replacing" the value with empty
+    /// value.
     pub fn delete(&self, key: &[u8]) -> Result<()> {
         self.put(key, b"")
     }
 
+    /// Attempts to freeze the current memtable if estimated size exceeds threshold.
     pub fn try_freeze(&self, estimated_size: usize) -> Result<()> {
         if estimated_size >= self.options.target_sst_size {
             let state_lock_guard = self.state_lock.lock();
@@ -112,6 +125,8 @@ impl LsmStorageInner {
         Ok(())
     }
 
+    /// Freezes the current memtable and replaces it with a fresh memtable, and inserts
+    /// the old one into `imm_memtables`.
     pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<()>) -> Result<()> {
         let memtable_id = self.next_sst_id();
         let new_memtable = Arc::new(MemTable::create(memtable_id));

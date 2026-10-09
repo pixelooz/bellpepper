@@ -29,6 +29,7 @@ impl MemTable {
         }
     }
 
+    /// Returns the current approximate size of the memtable.
     pub fn approximate_size(&self) -> usize {
         self.approximate_size.load(Ordering::Relaxed)
     }
