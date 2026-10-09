@@ -29,6 +29,10 @@ impl MemTable {
         }
     }
 
+    pub fn approximate_size(&self) -> usize {
+        self.approximate_size.load(Ordering::Relaxed)
+    }
+
     /// Puts the given key/value pair into the map and then increments the size of the MemTable.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         let approx_size = key.len() + value.len();

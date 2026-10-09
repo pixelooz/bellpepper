@@ -1,15 +1,23 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    mem,
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use anyhow::Result;
 use bytes::Bytes;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::mem_table::MemTable;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LsmStorageState {
-    memtable: Arc<MemTable>,
-    imm_memtables: Vec<Arc<MemTable>>,
+    pub(crate) memtable: Arc<MemTable>,
+    pub(crate) imm_memtables: Vec<Arc<MemTable>>,
+    pub(crate) l0_ss_tables: Vec<usize>,
 }
 
 impl LsmStorageState {
@@ -17,6 +25,29 @@ impl LsmStorageState {
         Self {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
+            l0_ss_tables: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LsmStorageOptions {
+    /// Block size in bytes.
+    pub block_size: usize,
+
+    /// SST size in bytes, and also the approximate size of memtables.
+    pub target_sst_size: usize,
+
+    /// Number of memtables allowed in memory before flushing them to L0.
+    pub num_memtable_limit: usize,
+}
+
+impl LsmStorageOptions {
+    pub fn default_for_tests() -> Self {
+        Self {
+            block_size: 4096,
+            target_sst_size: 2 << 20,
+            num_memtable_limit: 50,
         }
     }
 }
@@ -26,20 +57,31 @@ pub(crate) struct LsmStorageInner {
     pub(crate) state: Arc<RwLock<Arc<LsmStorageState>>>,
     pub(crate) state_lock: Mutex<()>,
     path: PathBuf,
+    next_sst_id: AtomicUsize,
+    pub(crate) options: LsmStorageOptions,
 }
 
 impl LsmStorageInner {
-    pub fn open(path: PathBuf) -> Self {
+    pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Self {
         let state = LsmStorageState::create();
         Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
-            path,
+            path: path.as_ref().to_path_buf(),
+            next_sst_id: AtomicUsize::new(1),
+            options,
         }
     }
 
+    pub(crate) fn next_sst_id(&self) -> usize {
+        self.next_sst_id.fetch_add(1, Ordering::SeqCst)
+    }
+
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.state.read().memtable.put(key, value)
+        self.state.read().memtable.put(key, value)?;
+        let approx_size = self.state.read().memtable.approximate_size();
+        self.try_freeze(approx_size)?;
+        Ok(())
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
@@ -56,5 +98,31 @@ impl LsmStorageInner {
 
     pub fn delete(&self, key: &[u8]) -> Result<()> {
         self.put(key, b"")
+    }
+
+    pub fn try_freeze(&self, estimated_size: usize) -> Result<()> {
+        if estimated_size >= self.options.target_sst_size {
+            let state_lock_guard = self.state_lock.lock();
+            let state_guard = self.state.read();
+            if state_guard.memtable.approximate_size() >= self.options.target_sst_size {
+                drop(state_guard);
+                self.force_freeze_memtable(&state_lock_guard)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<()>) -> Result<()> {
+        let memtable_id = self.next_sst_id();
+        let new_memtable = Arc::new(MemTable::create(memtable_id));
+
+        let mut state_guard = self.state.write();
+        let mut snapshot = state_guard.as_ref().clone();
+
+        let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
+
+        snapshot.imm_memtables.insert(0, old_memtable);
+        *state_guard = Arc::new(snapshot);
+        Ok(())
     }
 }
