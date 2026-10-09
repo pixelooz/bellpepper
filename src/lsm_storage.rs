@@ -24,7 +24,7 @@ impl LsmStorageState {
 #[derive(Debug)]
 pub(crate) struct LsmStorageInner {
     pub(crate) state: Arc<RwLock<Arc<LsmStorageState>>>,
-    pub(crate) state_lock: Arc<Mutex<()>>,
+    pub(crate) state_lock: Mutex<()>,
     path: PathBuf,
 }
 
@@ -33,7 +33,7 @@ impl LsmStorageInner {
         let state = LsmStorageState::create();
         Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
-            state_lock: Arc::new(Mutex::new(())),
+            state_lock: Mutex::new(()),
             path,
         }
     }
