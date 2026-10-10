@@ -87,8 +87,11 @@ impl LsmStorageInner {
     /// Puts the given key value pair in the memtable and attempts to freeze the table if
     /// size exceeds the threshold.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.state.read().memtable.put(key, value)?;
-        let approx_size = self.state.read().memtable.approximate_size();
+        let approx_size = {
+            let state = self.state.read();
+            state.memtable.put(key, value)?;
+            state.memtable.approximate_size()
+        };
         self.try_freeze(approx_size)?;
         Ok(())
     }
@@ -97,13 +100,23 @@ impl LsmStorageInner {
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let snapshot = {
             let guard = self.state.read();
-            guard.clone()
+            Arc::clone(&guard)
         };
-        let value = snapshot.memtable.get(key);
-        if value.as_ref().is_some_and(|x| x.is_empty()) {
-            return Ok(None);
+        if let Some(value) = snapshot.memtable.get(key) {
+            if value.is_empty() {
+                return Ok(None);
+            }
+            return Ok(Some(value));
         }
-        Ok(value)
+        for mmt in &snapshot.imm_memtables {
+            if let Some(value) = mmt.get(key) {
+                if value.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(value));
+            }
+        }
+        Ok(None)
     }
 
     /// Logically deletes the value for the given key by "replacing" the value with empty

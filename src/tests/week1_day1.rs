@@ -100,20 +100,48 @@ mod tests {
         opts.num_memtable_limit = 1000;
 
         let dir = PathBuf::from("../../task2_storage_integration");
-        let lsm_storage = Arc::new(LsmStorageInner::open(dir, opts));
+        let storage = Arc::new(LsmStorageInner::open(dir, opts));
 
         for _ in 0..1000 {
-            lsm_storage.put(b"1", b"2333").unwrap();
+            storage.put(b"1", b"2333").unwrap();
         }
-        let num_imm_memtables = lsm_storage.state.read().imm_memtables.len();
+        let num_imm_memtables = storage.state.read().imm_memtables.len();
         assert!(num_imm_memtables >= 1, "no memtable frozen?");
 
         for _ in 0..1000 {
-            lsm_storage.delete(b"1").unwrap();
+            storage.delete(b"1").unwrap();
         }
         assert!(
-            lsm_storage.state.read().imm_memtables.len() > num_imm_memtables,
+            storage.state.read().imm_memtables.len() > num_imm_memtables,
             "no memtable frozen?"
         );
+    }
+
+    #[test]
+    fn test_task4_storage_integration() {
+        let dir = PathBuf::from("../../task2_storage_integration");
+        let opts = LsmStorageOptions::default_for_tests();
+        let storage = Arc::new(LsmStorageInner::open(dir, opts));
+        assert_eq!(&storage.get(b"0").unwrap(), &None);
+        storage.put(b"1", b"233").unwrap();
+        storage.put(b"2", b"2333").unwrap();
+        storage.put(b"3", b"23333").unwrap();
+        storage
+            .force_freeze_memtable(&storage.state_lock.lock())
+            .unwrap();
+        storage.delete(b"1").unwrap();
+        storage.delete(b"2").unwrap();
+        storage.put(b"3", b"2333").unwrap();
+        storage.put(b"4", b"23333").unwrap();
+        storage
+            .force_freeze_memtable(&storage.state_lock.lock())
+            .unwrap();
+        storage.put(b"1", b"233333").unwrap();
+        storage.put(b"3", b"233333").unwrap();
+        assert_eq!(storage.state.read().imm_memtables.len(), 2);
+        assert_eq!(&storage.get(b"1").unwrap().unwrap()[..], b"233333");
+        assert_eq!(&storage.get(b"2").unwrap(), &None);
+        assert_eq!(&storage.get(b"3").unwrap().unwrap()[..], b"233333");
+        assert_eq!(&storage.get(b"4").unwrap().unwrap()[..], b"23333");
     }
 }
