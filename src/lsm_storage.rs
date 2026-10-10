@@ -97,6 +97,8 @@ impl LsmStorageInner {
     }
 
     /// Returns the value for the given key as Some(x) or None if not present.
+    /// If the current memtable doesn't have the value, looks for it in the
+    /// immutable memtables.
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         let snapshot = {
             let guard = self.state.read();
