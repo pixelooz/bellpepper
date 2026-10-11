@@ -14,3 +14,12 @@ One mutable memtable, followed by zero or more immutable memtables awaiting flus
 We are not using `upgradable_read` because all put operations will require a read lock but upgradable read can only be granted to one thread
 at a time, so in this particular use case, because we want to allow all threads to perform put operations without synchorinizing them via 
 locks, upgradable read would be the wrong choice, as it'll work like a write lock rather than a read lock.
+
+## Day 2
+The output is sorted, and each user key appears at most once with the value from the newest input containing that key. Tombstones participate
+in the precedence before `LsmIterator` hides them.
+
+- `MemTableIterator` exposes one sorted memtable.
+- `MergeIterator` combines sources of the same type, removes duplicate versions, and gives lower-indexed—that is, newer—sources precedence.
+- `LsmIterator` removes tombstones from the user-visible stream.
+- `FusedIterator` makes invalid and errored states safe for callers.
