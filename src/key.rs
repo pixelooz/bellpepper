@@ -85,7 +85,6 @@ impl Key<Bytes> {
         Key(bytes)
     }
 
-    /// Always use `raw_ref` to access the key in week 1 + 2.
     pub fn raw_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
@@ -101,7 +100,6 @@ impl<'a> Key<&'a [u8]> {
         Self(slice)
     }
 
-    /// Always use `raw_ref` to access the key in week 1 + 2.
     pub fn raw_ref(self) -> &'a [u8] {
         self.0
     }

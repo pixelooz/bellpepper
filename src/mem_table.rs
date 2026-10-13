@@ -1,11 +1,17 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    mem,
+    ops::Bound,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use anyhow::Result;
 use bytes::Bytes;
-use crossbeam_skiplist::SkipMap;
+use crossbeam_skiplist::{SkipMap, map};
+
+use crate::{key::KeySlice, lsm_iterator::StorageIterator};
 
 /// The smallest block of the Lsm Tree database. It is built using SkipList which is
 /// a concurrent map essentially of `Bytes`. Keeps track of its size and when size
@@ -17,6 +23,15 @@ pub(crate) struct MemTable {
     // wal: Option<Wal>,
     id: usize,
     approximate_size: AtomicUsize,
+}
+
+/// Create a `Bound` of `Bytes` from `&[u8]`.
+pub(crate) fn map_bound(bound: Bound<&[u8]>) -> Bound<Bytes> {
+    match bound {
+        Bound::Included(x) => Bound::Included(Bytes::copy_from_slice(x)),
+        Bound::Excluded(x) => Bound::Excluded(Bytes::copy_from_slice(x)),
+        Bound::Unbounded => Bound::Unbounded,
+    }
 }
 
 impl MemTable {
@@ -47,5 +62,57 @@ impl MemTable {
     /// Returns the value for the given key if exists otherwise returns `None`.
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.map.get(key).map(|e| e.value().clone())
+    }
+
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
+        let (lower, upper) = (map_bound(lower), map_bound(upper));
+
+        let map = Arc::clone(&self.map);
+        let iter = map.range((lower, upper));
+
+        let static_iter =
+            unsafe { mem::transmute::<SkipMapRangeIter<'_>, SkipMapRangeIter<'static>>(iter) };
+
+        let mut iter = MemTableIterator {
+            iter: static_iter,
+            map,
+            item: (Bytes::new(), Bytes::new()),
+        };
+        iter.next().unwrap();
+        iter
+    }
+}
+
+/// Type alias for `crossbeam_skiplist::map::Range`.
+type SkipMapRangeIter<'a> = map::Range<'a, Bytes, (Bound<Bytes>, Bound<Bytes>), Bytes, Bytes>;
+
+/// An iterator over a range of `SkipMap`.
+pub struct MemTableIterator {
+    iter: SkipMapRangeIter<'static>,
+    map: Arc<SkipMap<Bytes, Bytes>>,
+    item: (Bytes, Bytes),
+}
+
+impl StorageIterator for MemTableIterator {
+    type KeyType<'a> = KeySlice<'a>;
+
+    fn key(&self) -> Self::KeyType<'_> {
+        KeySlice::from_slice(&self.item.0[..])
+    }
+
+    fn value(&self) -> &[u8] {
+        &self.item.1[..]
+    }
+
+    fn is_valid(&self) -> bool {
+        !self.item.0[..].is_empty()
+    }
+
+    fn next(&mut self) -> Result<()> {
+        let entry = self.iter.next();
+        self.item = entry
+            .map(|x| (x.key().clone(), x.value().clone()))
+            .unwrap_or_else(|| (Bytes::from_static(&[]), Bytes::from_static(&[])));
+        Ok(())
     }
 }

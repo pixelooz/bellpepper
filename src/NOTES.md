@@ -23,3 +23,5 @@ in the precedence before `LsmIterator` hides them.
 - `MergeIterator` combines sources of the same type, removes duplicate versions, and gives lower-indexed—that is, newer—sources precedence.
 - `LsmIterator` removes tombstones from the user-visible stream.
 - `FusedIterator` makes invalid and errored states safe for callers.
+
+Uses a cursor based API, common in databases and inspired by RocksDB's iterator.
