@@ -38,6 +38,31 @@ pub fn expect_iter_error(mut iter: impl StorageIterator) {
     }
 }
 
+pub fn check_lsm_iter_result_by_key<I>(iter: &mut I, expected: Vec<(Bytes, Bytes)>)
+where
+    I: for<'a> StorageIterator<KeyType<'a> = &'a [u8]>,
+{
+    for (k, v) in expected {
+        assert!(iter.is_valid());
+        assert_eq!(
+            k,
+            iter.key(),
+            "expected key: {:?}, actual key: {:?}",
+            k,
+            as_bytes(iter.key()),
+        );
+        assert_eq!(
+            v,
+            iter.value(),
+            "expected value: {:?}, actual value: {:?}",
+            v,
+            as_bytes(iter.value()),
+        );
+        iter.next().unwrap();
+    }
+    assert!(!iter.is_valid());
+}
+
 impl StorageIterator for MockIterator {
     type KeyType<'a> = KeySlice<'a>;
 

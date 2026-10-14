@@ -1,9 +1,12 @@
+use std::ops::Bound;
+
 use crate::{
     iterators::{StorageIterator, merge_iterator::MergeIterator},
     mem_table::MemTableIterator,
 };
 
 use anyhow::{Result, bail};
+use bytes::Bytes;
 
 /// Represents the inner type for the `LsmIterator`.
 type LsmIteratorInner = MergeIterator<MemTableIterator>;
@@ -11,14 +14,32 @@ type LsmIteratorInner = MergeIterator<MemTableIterator>;
 pub struct LsmIterator {
     inner: LsmIteratorInner,
     is_valid: bool,
+    end_bound: Bound<Bytes>,
 }
 
 impl LsmIterator {
     /// Returns a newly instantiated LsmIterator.
-    pub fn new(iter: LsmIteratorInner) -> LsmIterator {
-        Self {
+    pub fn new(iter: LsmIteratorInner, end_bound: Bound<Bytes>) -> Result<LsmIterator> {
+        let mut iter = Self {
             is_valid: iter.is_valid(),
             inner: iter,
+            end_bound,
+        };
+        iter.check_end_bound();
+        while iter.inner.is_valid() && iter.inner.value().is_empty() {
+            iter.next_inner()?;
+        }
+        Ok(iter)
+    }
+
+    fn check_end_bound(&mut self) {
+        if !self.is_valid {
+            return;
+        }
+        match self.end_bound.as_ref() {
+            Bound::Unbounded => {}
+            Bound::Included(key) => self.is_valid = self.inner.key().raw_ref() <= key.as_ref(),
+            Bound::Excluded(key) => self.is_valid = self.inner.key().raw_ref() < key.as_ref(),
         }
     }
 
@@ -29,7 +50,7 @@ impl LsmIterator {
             self.is_valid = false;
             return Ok(());
         }
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -53,7 +74,7 @@ impl StorageIterator for LsmIterator {
         while self.inner.is_valid() && self.inner.value().is_empty() {
             self.next_inner()?;
         }
-        return Ok(());
+        Ok(())
     }
 
     fn num_active_iterators(&self) -> usize {
@@ -114,7 +135,7 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
             self.has_errored = true;
             return Err(err);
         }
-        return Ok(());
+        Ok(())
     }
 
     fn num_active_iterators(&self) -> usize {

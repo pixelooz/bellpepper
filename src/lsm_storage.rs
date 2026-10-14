@@ -1,5 +1,6 @@
 use std::{
     mem,
+    ops::Bound,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -11,7 +12,11 @@ use anyhow::Result;
 use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
-use crate::mem_table::MemTable;
+use crate::{
+    iterators::merge_iterator::MergeIterator,
+    lsm_iterator::{FusedIterator, LsmIterator},
+    mem_table::{MemTable, map_bound},
+};
 
 /// Represents the state of the storage engine with the current memtable, all the imm_memtables,
 /// and the ss_tables.
@@ -154,5 +159,25 @@ impl LsmStorageInner {
         snapshot.imm_memtables.insert(0, old_memtable);
         *state_guard = Arc::new(snapshot);
         Ok(())
+    }
+
+    pub fn scan(
+        &self,
+        lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
+    ) -> Result<FusedIterator<LsmIterator>> {
+        let snapshot = {
+            let guard = self.state.read();
+            Arc::clone(&guard)
+        };
+        let mut memtable_iters = Vec::with_capacity(snapshot.imm_memtables.len() + 1);
+        memtable_iters.push(Box::new(snapshot.memtable.scan(lower, upper)));
+        for mmt in &snapshot.imm_memtables {
+            memtable_iters.push(Box::new(mmt.scan(lower, upper)));
+        }
+        let merged_iter = MergeIterator::create(memtable_iters);
+        let lsm_iter = LsmIterator::new(merged_iter, map_bound(upper))?;
+        let fused_iter = FusedIterator::new(lsm_iter);
+        Ok(fused_iter)
     }
 }
