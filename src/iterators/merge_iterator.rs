@@ -118,9 +118,9 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
                 "heap invariant violated"
             );
             if curr_iter.1.key() == inner_iter.1.key() {
-                if let err @ Err(_) = inner_iter.1.next() {
+                if let Err(err) = inner_iter.1.next() {
                     PeekMut::pop(inner_iter);
-                    return err;
+                    return Err(err);
                 }
                 if !inner_iter.1.is_valid() {
                     PeekMut::pop(inner_iter);
