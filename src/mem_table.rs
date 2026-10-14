@@ -11,7 +11,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use crossbeam_skiplist::{SkipMap, map};
 
-use crate::{key::KeySlice, lsm_iterator::StorageIterator};
+use crate::{iterators::StorageIterator, key::KeySlice};
 
 /// The smallest block of the Lsm Tree database. It is built using SkipList which is
 /// a concurrent map essentially of `Bytes`. Keeps track of its size and when size
