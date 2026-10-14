@@ -6,6 +6,7 @@ mod tests {
 
     use crate::{
         iterators::{StorageIterator, merge_iterator::MergeIterator},
+        lsm_iterator::FusedIterator,
         mem_table::MemTable,
         tests::harness::{MockIterator, check_iter_result_by_key, expect_iter_error},
     };
@@ -234,5 +235,30 @@ mod tests {
         ]);
         // your implementation should correctly throw an error instead of panic
         expect_iter_error(iter);
+    }
+
+    #[test]
+    fn test_task3_fused_iterator() {
+        let iter = MockIterator::new(vec![]);
+        let mut fused_iter = FusedIterator::new(iter);
+        assert!(!fused_iter.is_valid());
+        fused_iter.next().unwrap();
+        fused_iter.next().unwrap();
+        fused_iter.next().unwrap();
+        assert!(!fused_iter.is_valid());
+
+        let iter = MockIterator::new_with_error(
+            vec![
+                (Bytes::from("a"), Bytes::from("1.1")),
+                (Bytes::from("a"), Bytes::from("1.1")),
+            ],
+            1,
+        );
+        let mut fused_iter = FusedIterator::new(iter);
+        assert!(fused_iter.is_valid());
+        assert!(fused_iter.next().is_err());
+        assert!(!fused_iter.is_valid());
+        assert!(fused_iter.next().is_err());
+        assert!(fused_iter.next().is_err());
     }
 }
