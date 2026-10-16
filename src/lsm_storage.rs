@@ -161,6 +161,9 @@ impl LsmStorageInner {
         Ok(())
     }
 
+    /// Creates a point-in-time snapshot iterator over the specified key range.
+    /// It merges all in-memory tables, yielding the latest version of each key while skipping tombstones.
+    /// The returned `FusedIterator` is safe to use in a loop and will permanently halt if an error occurs.
     pub fn scan(
         &self,
         lower: Bound<&[u8]>,

@@ -64,6 +64,7 @@ impl MemTable {
         self.map.get(key).map(|e| e.value().clone())
     }
 
+    /// Constructs a `MemTableIterator` on the active SkipMap given the lower and upper bound.
     pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
         let (lower, upper) = (map_bound(lower), map_bound(upper));
 
