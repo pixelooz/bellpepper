@@ -104,6 +104,8 @@ impl BlockIterator {
         self.seek_to(low);
     }
 
+    /// Seeks to the entry located at offset[index] and populates the `key` and `value_range`
+    /// and updates the index for the current key value pair.
     fn seek_to(&mut self, index: usize) {
         if index >= self.block.offsets.len() {
             self.key.clear();
@@ -115,6 +117,8 @@ impl BlockIterator {
         self.index = index;
     }
 
+    /// Seeks to the entry located at offset and populates the `key` and `value_range`
+    /// and updates the index for the current key value pair.
     fn seek_to_offset(&mut self, offset: usize) {
         let mut entries = &self.block.data[offset..];
         let key_len = usize::from(entries.get_u16());
