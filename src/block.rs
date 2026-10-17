@@ -1,4 +1,5 @@
 pub(crate) mod builder;
+pub(crate) mod iterator;
 
 use std::mem;
 

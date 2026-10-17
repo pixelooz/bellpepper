@@ -1,7 +1,11 @@
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+
     use crate::{
-        block::{Block, builder::BlockBuilder},
+        block::{Block, builder::BlockBuilder, iterator::BlockIterator},
         key::{KeySlice, KeyVec},
     };
 
@@ -22,7 +26,7 @@ mod tests {
         for idx in 0..num_of_keys() {
             let key = key_of(idx);
             let value = value_of(idx);
-            assert!(builder.add(key.as_key_slice(), &value[..]));
+            assert!(builder.add(key.as_slice(), &value[..]));
         }
         builder.build()
     }
@@ -62,5 +66,74 @@ mod tests {
         let decoded_block = Block::decode(&encoded);
         assert_eq!(block.offsets, decoded_block.offsets);
         assert_eq!(block.data, decoded_block.data);
+    }
+
+    #[test]
+    fn test_block_build_large_2() {
+        let mut builder = BlockBuilder::new(16);
+        assert!(builder.add(KeySlice::from_slice(b"11"), b"1"));
+        assert!(!builder.add(KeySlice::from_slice(b"11"), &b"1".repeat(100)));
+    }
+
+    fn as_bytes(x: &[u8]) -> Bytes {
+        Bytes::copy_from_slice(x)
+    }
+
+    #[test]
+    fn test_block_iterator() {
+        let block = Arc::new(generate_block());
+        let mut iter = BlockIterator::create_and_seek_to_first(block);
+        for _ in 0..5 {
+            for i in 0..num_of_keys() {
+                let key = iter.key();
+                let value = iter.value();
+                assert_eq!(
+                    key.raw_ref(),
+                    key_of(i).raw_ref(),
+                    "expected key: {:?}, actual key: {:?}",
+                    as_bytes(key_of(i).raw_ref()),
+                    as_bytes(key.raw_ref())
+                );
+                assert_eq!(
+                    value,
+                    value_of(i),
+                    "expected value: {:?}, actual value: {:?}",
+                    as_bytes(&value_of(i)),
+                    as_bytes(value)
+                );
+                iter.next();
+            }
+            iter.seek_to_first();
+        }
+    }
+
+    #[test]
+    fn test_block_seek_key() {
+        let block = Arc::new(generate_block());
+        let mut iter = BlockIterator::create_and_seek_to_key(block, key_of(0).as_slice());
+        for offset in 1..=5 {
+            for i in 0..num_of_keys() {
+                let key = iter.key();
+                let value = iter.value();
+                assert_eq!(
+                    key.raw_ref(),
+                    key_of(i).raw_ref(),
+                    "expected key: {:?}, actual key: {:?}",
+                    as_bytes(key_of(i).raw_ref()),
+                    as_bytes(key.raw_ref())
+                );
+                assert_eq!(
+                    value,
+                    value_of(i),
+                    "expected value: {:?}, actual value: {:?}",
+                    as_bytes(&value_of(i)),
+                    as_bytes(value)
+                );
+                iter.seek_to_key(KeySlice::from_slice(
+                    &format!("key_{:03}", i * 5 + offset).into_bytes(),
+                ));
+            }
+            iter.seek_to_key(KeySlice::from_slice(b"k"));
+        }
     }
 }
