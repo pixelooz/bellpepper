@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod block;
 mod iterators;
 mod key;
 mod lsm_iterator;

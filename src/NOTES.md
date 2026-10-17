@@ -25,3 +25,32 @@ in the precedence before `LsmIterator` hides them.
 - `FusedIterator` makes invalid and errored states safe for callers.
 
 Uses a cursor based API, common in databases and inspired by RocksDB's iterator.
+
+## Day 3
+Blocks: A compact sequence of sorted entries plus an index of their starting offsets.
+
+- Encoding and Decoding are inverses for every valid block.
+- Entry offsets are ordered and refer to valid positions in the data section.
+- The footer contains exactly one offset per entry and the encoded entry count.
+- Except when the first entry alone exceed the target, adding an entry must not make the block larger than `target_size`.
+- Seeking, positions the iterator at the first key greater than or equal to the target, or makes it invalid if no such key exists.
+
+An SST consists of multiple blocks, and when enough immutable memtables accumumlate, the engine flushes the oldest one to an SST.
+
+The block encoding format:
+```
+----------------------------------------------------------------------------------------------------
+|             Data Section             |              Offset Section             |      Extra      |
+----------------------------------------------------------------------------------------------------
+| Entry #1 | Entry #2 | ... | Entry #N | Offset #1 | Offset #2 | ... | Offset #N | num_of_elements |
+----------------------------------------------------------------------------------------------------
+```
+
+Each `Entry` is a key value pair:
+```
+-----------------------------------------------------------------------
+|                           Entry #1                            | ... |
+-----------------------------------------------------------------------
+| key_len (2B) | key (keylen) | value_len (2B) | value (varlen) | ... |
+-----------------------------------------------------------------------
+```
