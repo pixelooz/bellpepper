@@ -60,7 +60,7 @@ impl Key<Vec<u8>> {
     }
 
     /// Returns `Self` as a `KeySlice`.
-    pub fn as_slice(&self) -> KeySlice<'_> {
+    pub fn as_key_slice(&self) -> KeySlice<'_> {
         Key(self.0.as_slice())
     }
 
