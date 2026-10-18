@@ -13,10 +13,13 @@ use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::{
+    block::Block,
     iterators::merge_iterator::MergeIterator,
     lsm_iterator::{FusedIterator, LsmIterator},
     mem_table::{MemTable, map_bound},
 };
+
+pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
 /// Represents the state of the storage engine with the current memtable, all the imm_memtables,
 /// and the ss_tables.

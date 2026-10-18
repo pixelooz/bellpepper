@@ -26,7 +26,7 @@ mod tests {
         for idx in 0..num_of_keys() {
             let key = key_of(idx);
             let value = value_of(idx);
-            assert!(builder.add(key.as_slice(), &value[..]));
+            assert!(builder.add(key.as_key_slice(), &value[..]));
         }
         builder.build()
     }
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn test_block_seek_key() {
         let block = Arc::new(generate_block());
-        let mut iter = BlockIterator::create_and_seek_to_key(block, key_of(0).as_slice());
+        let mut iter = BlockIterator::create_and_seek_to_key(block, key_of(0).as_key_slice());
         for offset in 1..=5 {
             for i in 0..num_of_keys() {
                 let key = iter.key();

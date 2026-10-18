@@ -65,7 +65,7 @@ impl Key<Vec<u8>> {
     }
 
     /// Converts `Self` into `KeyBytes`.
-    pub fn into_bytes(self) -> KeyBytes {
+    pub fn into_key_bytes(self) -> KeyBytes {
         Key(self.0.into())
     }
 

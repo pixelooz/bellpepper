@@ -63,7 +63,7 @@ impl BlockIterator {
 
     /// Returns the key of the current entry.
     pub fn key(&self) -> KeySlice<'_> {
-        self.key.as_slice()
+        self.key.as_key_slice()
     }
 
     /// Returns the value of the current entry.

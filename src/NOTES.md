@@ -4,6 +4,7 @@
 One mutable memtable, followed by zero or more immutable memtables awaiting flush.
 
 **Invariants:**
+
 - The engine has exaclty one current mutable memtable.
 - The `imm_memtables` are ordered from newest to oldest.
 - The first version of the key found while probing from newest to oldest determines the results.
@@ -20,6 +21,7 @@ The output is sorted, and each user key appears at most once with the value from
 in the precedence before `LsmIterator` hides them.
 
 **Invariants:**
+
 - `MemTableIterator` exposes one sorted memtable.
 - `MergeIterator` combines sources of the same type, removes duplicate versions, and gives lower-indexed—that is, newer—sources precedence.
 - `LsmIterator` removes tombstones from the user-visible stream.
@@ -60,9 +62,26 @@ Each `Entry` is a key value pair:
 An SST composes many blocks into an immutable file and adds enough metadata to locate which block the requested key belongs to.
 
 **Invariants:**
+
 - Blocks and their metadata appear in the same key order.
 - Each `BlockMeta` records block's offset and their actual first and last key.
 - An iterator directly retains only the block it currently needs and will move to the next one if a seek lands beyond the current
   block. The cache may retain other blocks independently.
 - A lower bound key never skips a key greater than or equal to the target.
 - The block cache identifies a block both by its SST_ID's and block index. Block from different SSDs must never collide.
+
+**Task1:**
+
+An SST consists of data blocks and index blocks, they are loaded lazily when being read. We don't implement the index blocks and
+assume that for our usecase the entire `BlockMeta` fits within the main memory.
+
+The `BlockMeta` must contain the information for every block and concerning its `offset`, `first_key`, and `last_key`.
+
+The SST encoding has the following layout.
+```
+-------------------------------------------------------------------------------------------
+|         Block Section         |          Meta Section         |          Extra          |
+-------------------------------------------------------------------------------------------
+| data block | ... | data block |            metadata           | meta block offset (u32) |
+-------------------------------------------------------------------------------------------
+```
