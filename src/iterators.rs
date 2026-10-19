@@ -1,4 +1,5 @@
 pub mod merge_iterator;
+pub mod two_merge_iterators;
 
 use anyhow::Result;
 
