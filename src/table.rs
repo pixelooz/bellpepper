@@ -1,9 +1,9 @@
 pub(crate) mod builder;
 pub(crate) mod iterator;
 
-use std::{fs::File, io::Write, os::unix::fs::FileExt, path::Path, sync::Arc};
+use std::{fs::File, io::Write, mem, os::unix::fs::FileExt, path::Path, sync::Arc};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use bytes::{Buf, BufMut};
 
 use crate::{
@@ -27,27 +27,38 @@ pub struct BlockMeta {
 
 impl BlockMeta {
     /// Encode block meta to a buffer.
-    pub fn encode_block_meta(block_meta: &[BlockMeta], buffer: &mut Vec<u8>) {
+    pub fn encode_block_meta(block_meta: &[BlockMeta], buffer: &mut Vec<u8>) -> Result<()> {
+        let mut estimated_size = 0;
+
         for bm in block_meta {
-            buffer.put_u32(bm.offset as u32);
-            buffer.put_u16(bm.first_key.len() as u16);
+            estimated_size += mem::size_of::<u32>();
+            estimated_size += mem::size_of::<u16>();
+            estimated_size += bm.first_key.len();
+            estimated_size += mem::size_of::<u16>();
+            estimated_size += bm.last_key.len();
+        }
+        buffer.reserve(estimated_size);
+        for bm in block_meta {
+            buffer.put_u32(u32::try_from(bm.offset).context("SST meta block offset too large")?);
+            buffer.put_u16(u16::try_from(bm.first_key.len()).context("SST first key too large")?);
             buffer.put_slice(bm.first_key.raw_ref());
-            buffer.put_u16(bm.last_key.len() as u16);
+            buffer.put_u16(u16::try_from(bm.last_key.len()).context("SST last key too large")?);
             buffer.put_slice(bm.last_key.raw_ref());
         }
+        Ok(())
     }
 
     /// Decode block meta from a buffer.
-    pub fn decode_block_meta(mut buffer: impl Buf) -> Vec<BlockMeta> {
+    pub fn decode_block_meta(mut buffer: impl Buf) -> Result<Vec<BlockMeta>> {
         let mut block_metas = Vec::new();
         while buffer.has_remaining() {
             let offset = buffer.get_u32() as usize;
 
             let key_len = buffer.get_u16();
-            let first_key = KeyBytes::from_bytes(buffer.copy_to_bytes(usize::from(key_len)));
+            let first_key = KeyBytes::from_bytes(buffer.copy_to_bytes(key_len as usize));
 
             let key_len = buffer.get_u16();
-            let last_key = KeyBytes::from_bytes(buffer.copy_to_bytes(usize::from(key_len)));
+            let last_key = KeyBytes::from_bytes(buffer.copy_to_bytes(key_len as usize));
 
             block_metas.push(BlockMeta {
                 offset,
@@ -55,7 +66,7 @@ impl BlockMeta {
                 last_key,
             });
         }
-        block_metas
+        Ok(block_metas)
     }
 }
 
@@ -69,7 +80,8 @@ impl FileObject {
     }
 
     pub fn read(&self, offset: u64, len: u64) -> Result<Vec<u8>> {
-        let mut data = vec![0; len as usize];
+        let len = usize::try_from(len).context("conversion u64 -> usize failed")?;
+        let mut data = vec![0; len];
         match self.0.as_ref() {
             Some(file) => file.read_exact_at(&mut data, offset)?,
             None => bail!("file should exist when calling this method"),
@@ -148,7 +160,7 @@ impl SsTable {
         let raw_bm_offset = file.read(file_len - 4, 4)?;
         let block_meta_offset = u64::from((&raw_bm_offset[..]).get_u32());
         let raw_block_meta = file.read(block_meta_offset, file_len - 4 - block_meta_offset)?;
-        let block_metas = BlockMeta::decode_block_meta(&raw_block_meta[..]);
+        let block_metas = BlockMeta::decode_block_meta(&raw_block_meta[..])?;
         Ok(Self {
             first_key: block_metas.first().unwrap().first_key.clone(),
             last_key: block_metas.last().unwrap().last_key.clone(),

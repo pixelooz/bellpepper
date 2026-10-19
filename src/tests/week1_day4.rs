@@ -1,12 +1,12 @@
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, str::FromStr, sync::Arc};
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use tempfile::{TempDir, tempdir};
 
     use crate::{
-        block::{Block, builder::BlockBuilder, iterator::BlockIterator},
+        block::iterator::BlockIterator,
         iterators::StorageIterator,
         key::{KeySlice, KeyVec},
         table::{SsTable, builder::SsTableBuilder, iterator::SsTableIterator},

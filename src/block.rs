@@ -3,7 +3,6 @@ pub(crate) mod iterator;
 
 use std::mem;
 
-use anyhow::{Context, Result, ensure};
 use bytes::{Buf, BufMut, Bytes};
 
 pub(crate) const SIZEOF_U16: usize = mem::size_of::<u16>();

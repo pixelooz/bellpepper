@@ -1,11 +1,8 @@
 use anyhow::Result;
-use std::{cmp::Ordering, sync::Arc};
+use std::sync::Arc;
 
 use crate::{
-    block::{builder::BlockBuilder, iterator::BlockIterator},
-    iterators::StorageIterator,
-    key::KeySlice,
-    table::SsTable,
+    block::iterator::BlockIterator, iterators::StorageIterator, key::KeySlice, table::SsTable,
 };
 
 /// An iterator over the contents of the [SsTable].
@@ -36,7 +33,7 @@ impl SsTableIterator {
 
     fn seek_to_first_inner(table: &Arc<SsTable>) -> Result<(usize, BlockIterator)> {
         let block = table.read_block_cached(0)?;
-        let mut block_iterator = BlockIterator::create_and_seek_to_first(block);
+        let block_iterator = BlockIterator::create_and_seek_to_first(block);
         Ok((0, block_iterator))
     }
 

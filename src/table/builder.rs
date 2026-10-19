@@ -96,7 +96,7 @@ impl SsTableBuilder {
         let mut buffer = self.data;
         let meta_offset = buffer.len();
 
-        BlockMeta::encode_block_meta(&self.block_metas, &mut buffer);
+        BlockMeta::encode_block_meta(&self.block_metas, &mut buffer)?;
         buffer.put_u32(u32::try_from(meta_offset).context("meta_offset is too large")?);
 
         let file = FileObject::create_write(path.as_ref(), buffer)?;

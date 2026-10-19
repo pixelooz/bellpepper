@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![allow(unused)]
+#![allow(unused_variables)]
 
 mod block;
 mod iterators;
