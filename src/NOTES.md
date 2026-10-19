@@ -85,3 +85,17 @@ The SST encoding has the following layout.
 | data block | ... | data block |            metadata           | meta block offset (u32) |
 -------------------------------------------------------------------------------------------
 ```
+
+## Day 5
+
+![week1-day5 overview](../assets/week1-05-overview.svg)
+
+**Read Path Invariants**
+
+- Mutable and Immutable memtables take precendence over SSTables, and newer sources take precedence over older sources within each 
+  group.
+- A tombstone in a newer source hides every other older value for that key.
+- `scan` returns sorted, unique, live values within the exact requested bounds.
+- A seek may land on the next greater key, so `get` returns a value only after checking for exact key equality.
+- Creating and Seeking SST iterators may perform I/O and therefore happens after releasing the state lock, using a consistent cloned
+  snapshot
