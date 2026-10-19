@@ -7,8 +7,9 @@ mod tests {
 
     use crate::{
         block::{Block, builder::BlockBuilder, iterator::BlockIterator},
+        iterators::StorageIterator,
         key::{KeySlice, KeyVec},
-        table::{SsTable, builder::SsTableBuilder},
+        table::{SsTable, builder::SsTableBuilder, iterator::SsTableIterator},
     };
 
     #[test]
@@ -102,5 +103,67 @@ mod tests {
 
     fn as_bytes(x: &[u8]) -> Bytes {
         Bytes::copy_from_slice(x)
+    }
+
+    #[test]
+    fn test_sst_iterator() {
+        let (_dir, sst) = generate_sst();
+        let sst = Arc::new(sst);
+        let mut iter = SsTableIterator::create_and_seek_to_first(sst).unwrap();
+        for _ in 0..5 {
+            for i in 0..num_of_keys() {
+                let key = iter.key();
+                let value = iter.value();
+                assert_eq!(
+                    key.raw_ref(),
+                    key_of(i).raw_ref(),
+                    "expected key: {:?}, actual key: {:?}",
+                    as_bytes(key_of(i).raw_ref()),
+                    as_bytes(key.raw_ref())
+                );
+                assert_eq!(
+                    value,
+                    value_of(i),
+                    "expected value: {:?}, actual value: {:?}",
+                    as_bytes(&value_of(i)),
+                    as_bytes(value)
+                );
+                iter.next().unwrap();
+            }
+            iter.seek_to_first().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_sst_seek_key() {
+        let (_dir, sst) = generate_sst();
+        let sst = Arc::new(sst);
+        let mut iter =
+            SsTableIterator::create_and_seek_to_key(sst, key_of(0).as_key_slice()).unwrap();
+        for offset in 1..=5 {
+            for i in 0..num_of_keys() {
+                let key = iter.key();
+                let value = iter.value();
+                assert_eq!(
+                    key.raw_ref(),
+                    key_of(i).raw_ref(),
+                    "expected key: {:?}, actual key: {:?}",
+                    as_bytes(key_of(i).raw_ref()),
+                    as_bytes(key.raw_ref())
+                );
+                assert_eq!(
+                    value,
+                    value_of(i),
+                    "expected value: {:?}, actual value: {:?}",
+                    as_bytes(&value_of(i)),
+                    as_bytes(value)
+                );
+                iter.seek_to_key(KeySlice::from_slice(
+                    &format!("key_{:03}", i * 5 + offset).into_bytes(),
+                ))
+                .unwrap();
+            }
+            iter.seek_to_key(KeySlice::from_slice(b"k")).unwrap();
+        }
     }
 }

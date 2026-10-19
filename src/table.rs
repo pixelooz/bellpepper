@@ -1,4 +1,5 @@
 pub(crate) mod builder;
+pub(crate) mod iterator;
 
 use std::{fs::File, io::Write, os::unix::fs::FileExt, path::Path, sync::Arc};
 
