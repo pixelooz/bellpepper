@@ -34,7 +34,7 @@ impl SsTableBuilder {
             builder: BlockBuilder::new(block_size),
             first_key: KeyVec::new(),
             last_key: KeyVec::new(),
-            data: Vec::new(),
+            data: Vec::with_capacity(2 << 20),
             block_metas: Vec::new(),
             block_size,
             key_hashes: Vec::new(),
