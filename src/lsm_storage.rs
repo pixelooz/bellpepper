@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fs::{self, File},
     mem,
     ops::Bound,
     path::{Path, PathBuf},
@@ -9,7 +10,7 @@ use std::{
     },
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
@@ -22,7 +23,7 @@ use crate::{
     lsm_iterator::{FusedIterator, LsmIterator},
     lsm_options::LsmStorageOptions,
     mem_table::{MemTable, map_bound},
-    table::{SsTable, iterator::SsTableIterator},
+    table::{SsTable, builder::SsTableBuilder, iterator::SsTableIterator},
 };
 
 /// A concurrent cache used for caching blocks to avoid reaching out to disk for commonly read blocks.
@@ -100,6 +101,9 @@ pub(crate) struct LsmStorageInner {
 impl LsmStorageInner {
     /// Opens the storage engine at the given path with the given options.
     pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
+        if !path.as_ref().exists() {
+            fs::create_dir_all(&path).context("failed to create DB dir")?;
+        }
         let state = LsmStorageState::create();
         let block_cache = Arc::new(BlockCache::new(1 << 20));
         Ok(Self {
@@ -115,6 +119,28 @@ impl LsmStorageInner {
     /// Returns the next sst_id for the requested memtable.
     pub(crate) fn next_sst_id(&self) -> usize {
         self.next_sst_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
+        path.as_ref().join(format!("{:05}.sst", id))
+    }
+
+    pub(crate) fn path_of_sst(&self, id: usize) -> PathBuf {
+        Self::path_of_sst_static(&self.path, id)
+    }
+
+    pub(crate) fn path_of_wal_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
+        path.as_ref().join(format!("{:05}.wal", id))
+    }
+
+    pub(crate) fn path_of_wal(&self, id: usize) -> PathBuf {
+        Self::path_of_wal_static(&self.path, id)
+    }
+
+    /// Syncs the current file to disk.
+    pub(super) fn sync_dir(&self) -> Result<()> {
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
     }
 
     /// Puts the given key value pair in the memtable and attempts to freeze the table if
@@ -209,6 +235,46 @@ impl LsmStorageInner {
         let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
 
         snapshot.imm_memtables.insert(0, old_memtable);
+        *state_guard = Arc::new(snapshot);
+        Ok(())
+    }
+
+    /// Force flush the earliest-created immutable memtable to disk
+    pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
+        let _state_lock = self.state_lock.lock();
+
+        let last_memtable = {
+            let guard = self.state.read();
+            let Some(mmt) = guard.imm_memtables.last() else {
+                return Ok(());
+            };
+            Arc::clone(mmt)
+        };
+        let mut builder = SsTableBuilder::new(self.options.block_size);
+        last_memtable.flush(&mut builder)?;
+
+        let sst_id = last_memtable.id();
+        let sst = Arc::new(builder.build(
+            &self.path_of_sst(sst_id),
+            sst_id,
+            Some(self.block_cache.clone()),
+        )?);
+        // TODO: call sync later here
+        let mut state_guard = self.state.write();
+        let mut snapshot = state_guard.as_ref().clone();
+
+        let memtable = snapshot
+            .imm_memtables
+            .pop()
+            .expect("empty should've returned above");
+
+        assert_eq!(
+            memtable.id(),
+            sst_id,
+            "last SST ID is not equal to popped SST ID"
+        );
+        snapshot.l0_ss_tables.insert(0, sst_id);
+        snapshot.ss_tables.insert(sst_id, sst);
         *state_guard = Arc::new(snapshot);
         Ok(())
     }

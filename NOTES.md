@@ -98,3 +98,17 @@ The SST encoding has the following layout.
 - A seek may land on the next greater key, so `get` returns a value only after checking for exact key equality.
 - Creating and Seeking SST iterators may perform I/O and therefore happens after releasing the state lock, using a consistent cloned
   snapshot
+
+## Day 6
+
+![week1-day5 overview](../assets/week1-05-overview.svg)
+
+**Write Path Invariants**
+
+- Only the oldest immutable memtable is selected for the next flush.
+- `state_lock` serializes the flush with other structural changes.
+- Building and writing the SST occurs outside the read-write lock.
+- Installing the SST removes exactly the memtable that was flushed, inserts the `SsTable` into `ss_tables`, and inserts its ID at the 
+  front - the newest side - of the `l0_ss_tables` in one snapshot update.
+- SST optimization may only exclude a file when its key range cannot contribute to the user request. An optimization should not change
+  query results.

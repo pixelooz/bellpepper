@@ -70,6 +70,7 @@ impl BlockMeta {
     }
 }
 
+/// Represents the underlying file and its cached size.
 #[derive(Debug)]
 pub struct FileObject(Option<File>, u64);
 

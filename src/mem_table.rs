@@ -11,7 +11,7 @@ use anyhow::Result;
 use bytes::Bytes;
 use crossbeam_skiplist::{SkipMap, map};
 
-use crate::{iterators::StorageIterator, key::KeySlice};
+use crate::{iterators::StorageIterator, key::KeySlice, table::builder::SsTableBuilder};
 
 /// The smallest block of the Lsm Tree database. It is built using SkipList which is
 /// a concurrent map essentially of `Bytes`. Keeps track of its size and when size
@@ -44,6 +44,11 @@ impl MemTable {
         }
     }
 
+    /// The id of the MemTable.
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
     /// Returns the current approximate size of the memtable.
     pub fn approximate_size(&self) -> usize {
         self.approximate_size.load(Ordering::Relaxed)
@@ -62,6 +67,18 @@ impl MemTable {
     /// Returns the value for the given key if exists otherwise returns `None`.
     pub fn get(&self, key: &[u8]) -> Option<Bytes> {
         self.map.get(key).map(|e| e.value().clone())
+    }
+
+    pub fn put_batch(&self, data: &[(KeySlice, &[u8])]) -> Result<()> {
+        unimplemented!()
+    }
+
+    /// Flush the mem-table to SSTable.
+    pub fn flush(&self, builder: &mut SsTableBuilder) -> Result<()> {
+        for entry in self.map.iter() {
+            builder.add(KeySlice::from_slice(entry.key()), entry.value());
+        }
+        Ok(())
     }
 
     /// Constructs a `MemTableIterator` on the active SkipMap given the lower and upper bound.
