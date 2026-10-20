@@ -15,6 +15,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "crc32fast",
+ "crossbeam-channel",
  "crossbeam-skiplist",
  "farmhash",
  "moka",

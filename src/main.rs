@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 
 mod block;
+mod compact;
 mod iterators;
 mod key;
 mod lsm_iterator;

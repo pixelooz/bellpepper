@@ -6,7 +6,7 @@ use bytes::Bytes;
 use crate::{
     iterators::StorageIterator,
     key::KeySlice,
-    lsm_storage::BlockCache,
+    lsm_storage::{BlockCache, LsmStorageInner},
     table::{SsTable, builder::SsTableBuilder},
 };
 
@@ -156,4 +156,11 @@ where
         !iter.is_valid(),
         "iterator should not be valid at the end of the check"
     );
+}
+
+pub fn sync(storage: &LsmStorageInner) {
+    storage
+        .force_freeze_memtable(&storage.state_lock.lock())
+        .unwrap();
+    storage.force_flush_next_imm_memtable().unwrap();
 }
