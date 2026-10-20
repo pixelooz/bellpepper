@@ -92,7 +92,7 @@ mod tests {
     fn test_sst_decode() {
         let (_dir, sst) = generate_sst();
         let meta = sst.block_metas.clone();
-        let new_sst = SsTable::open_for_test(sst.file).unwrap();
+        let new_sst = SsTable::open_for_test(sst.file_object).unwrap();
         assert_eq!(new_sst.block_metas, meta);
         assert_eq!(new_sst.first_key().raw_ref(), key_of(0).raw_ref());
         assert_eq!(

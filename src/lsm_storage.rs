@@ -116,6 +116,12 @@ impl LsmStorageInner {
         })
     }
 
+    /// Syncs the current file to disk.
+    pub(super) fn sync_dir(&self) -> Result<()> {
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
+    }
+
     /// Returns the next sst_id for the requested memtable.
     pub(crate) fn next_sst_id(&self) -> usize {
         self.next_sst_id.fetch_add(1, Ordering::SeqCst)
@@ -135,12 +141,6 @@ impl LsmStorageInner {
 
     pub(crate) fn path_of_wal(&self, id: usize) -> PathBuf {
         Self::path_of_wal_static(&self.path, id)
-    }
-
-    /// Syncs the current file to disk.
-    pub(super) fn sync_dir(&self) -> Result<()> {
-        File::open(&self.path)?.sync_all()?;
-        Ok(())
     }
 
     /// Puts the given key value pair in the memtable and attempts to freeze the table if
@@ -255,7 +255,7 @@ impl LsmStorageInner {
 
         let sst_id = last_memtable.id();
         let sst = Arc::new(builder.build(
-            &self.path_of_sst(sst_id),
+            self.path_of_sst(sst_id),
             sst_id,
             Some(self.block_cache.clone()),
         )?);

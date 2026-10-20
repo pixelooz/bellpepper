@@ -99,11 +99,11 @@ impl SsTableBuilder {
         BlockMeta::encode_block_meta(&self.block_metas, &mut buffer)?;
         buffer.put_u32(u32::try_from(meta_offset).context("meta_offset is too large")?);
 
-        let file = FileObject::create_write(path.as_ref(), buffer)?;
+        let file_object = FileObject::create_write(path.as_ref(), buffer)?;
         Ok(SsTable {
             first_key: self.block_metas.first().unwrap().first_key.clone(),
             last_key: self.block_metas.last().unwrap().last_key.clone(),
-            file,
+            file_object,
             block_metas: self.block_metas,
             meta_block_offset: meta_offset,
             id,
