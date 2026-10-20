@@ -2,10 +2,8 @@
 mod tests {
     use std::{path::PathBuf, sync::Arc};
 
-    use crate::{
-        lsm_storage::{LsmStorageInner, LsmStorageOptions},
-        mem_table::MemTable,
-    };
+    use crate::lsm_options::LsmStorageOptions;
+    use crate::{lsm_storage::LsmStorageInner, mem_table::MemTable};
 
     #[test]
     fn test_task1_memtable_get() {
@@ -40,8 +38,8 @@ mod tests {
     #[test]
     fn test_task2_storage_integration() {
         let dir = PathBuf::from("../../task2_storage_integration");
-        let opts = LsmStorageOptions::default_for_tests();
-        let storage = Arc::new(LsmStorageInner::open(dir, opts));
+        let opts = LsmStorageOptions::default_for_week1_test();
+        let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
         assert!(storage.get(b"0").unwrap().is_none());
 
@@ -61,8 +59,8 @@ mod tests {
     #[test]
     fn test_task3_storage_integration() {
         let dir = PathBuf::from("../../task2_storage_integration");
-        let opts = LsmStorageOptions::default_for_tests();
-        let storage = Arc::new(LsmStorageInner::open(dir, opts));
+        let opts = LsmStorageOptions::default_for_week1_test();
+        let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
         storage.put(b"1", b"233").unwrap();
         storage.put(b"2", b"2333").unwrap();
@@ -95,12 +93,12 @@ mod tests {
 
     #[test]
     fn test_task3_free_on_capacity() {
-        let mut opts = LsmStorageOptions::default_for_tests();
+        let mut opts = LsmStorageOptions::default_for_week1_test();
         opts.target_sst_size = 1024;
         opts.num_memtable_limit = 1000;
 
         let dir = PathBuf::from("../../task2_storage_integration");
-        let storage = Arc::new(LsmStorageInner::open(dir, opts));
+        let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
         for _ in 0..1000 {
             storage.put(b"1", b"2333").unwrap();
@@ -120,8 +118,8 @@ mod tests {
     #[test]
     fn test_task4_storage_integration() {
         let dir = PathBuf::from("../../task2_storage_integration");
-        let opts = LsmStorageOptions::default_for_tests();
-        let storage = Arc::new(LsmStorageInner::open(dir, opts));
+        let opts = LsmStorageOptions::default_for_week1_test();
+        let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
         assert_eq!(&storage.get(b"0").unwrap(), &None);
         storage.put(b"1", b"233").unwrap();
         storage.put(b"2", b"2333").unwrap();

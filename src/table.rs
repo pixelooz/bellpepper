@@ -70,6 +70,7 @@ impl BlockMeta {
     }
 }
 
+#[derive(Debug)]
 pub struct FileObject(Option<File>, u64);
 
 impl FileObject {
@@ -103,6 +104,7 @@ impl FileObject {
 
 /// An SSTable: Collections of Blocks with a footer containing Block metadata used for
 /// efficient reads.
+#[derive(Debug)]
 pub struct SsTable {
     /// The actual storage unit of the [SsTable].
     pub(crate) file: FileObject,

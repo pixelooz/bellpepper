@@ -1,7 +1,14 @@
+use std::{path::Path, sync::Arc};
+
 use anyhow::{Result, bail};
 use bytes::Bytes;
 
-use crate::{iterators::StorageIterator, key::KeySlice};
+use crate::{
+    iterators::StorageIterator,
+    key::KeySlice,
+    lsm_storage::BlockCache,
+    table::{SsTable, builder::SsTableBuilder},
+};
 
 #[derive(Clone)]
 pub struct MockIterator {
@@ -104,6 +111,19 @@ impl StorageIterator for MockIterator {
         }
         self.index < self.data.len()
     }
+}
+
+pub fn generate_sst(
+    id: usize,
+    path: impl AsRef<Path>,
+    data: Vec<(Bytes, Bytes)>,
+    block_cache: Option<Arc<BlockCache>>,
+) -> SsTable {
+    let mut builder = SsTableBuilder::new(128);
+    for (key, value) in data {
+        builder.add(KeySlice::from_slice(&key[..]), &value[..]);
+    }
+    builder.build(path.as_ref(), id, block_cache).unwrap()
 }
 
 pub fn as_bytes(x: &[u8]) -> Bytes {

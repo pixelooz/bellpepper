@@ -4,10 +4,11 @@ mod tests {
 
     use bytes::Bytes;
 
+    use crate::lsm_options::LsmStorageOptions;
     use crate::{
         iterators::{StorageIterator, merge_iterator::MergeIterator},
         lsm_iterator::FusedIterator,
-        lsm_storage::{LsmStorageInner, LsmStorageOptions},
+        lsm_storage::LsmStorageInner,
         mem_table::MemTable,
         tests::harness::{
             MockIterator, check_iter_result_by_key, check_lsm_iter_result_by_key, expect_iter_error,
@@ -268,8 +269,8 @@ mod tests {
     #[test]
     fn test_task4_integration() {
         let dir = PathBuf::from("../../task4_integration");
-        let opts = LsmStorageOptions::default_for_tests();
-        let storage = Arc::new(LsmStorageInner::open(dir, opts));
+        let opts = LsmStorageOptions::default_for_week1_test();
+        let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
         storage.put(b"1", b"233").unwrap();
         storage.put(b"2", b"2333").unwrap();

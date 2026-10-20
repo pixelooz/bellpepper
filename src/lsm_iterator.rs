@@ -1,15 +1,19 @@
 use std::ops::Bound;
 
 use crate::{
-    iterators::{StorageIterator, merge_iterator::MergeIterator},
+    iterators::{
+        StorageIterator, merge_iterator::MergeIterator, two_merge_iterators::TwoMergeIterator,
+    },
     mem_table::MemTableIterator,
+    table::iterator::SsTableIterator,
 };
 
 use anyhow::{Result, bail};
 use bytes::Bytes;
 
 /// Represents the inner type for the `LsmIterator`.
-type LsmIteratorInner = MergeIterator<MemTableIterator>;
+type LsmIteratorInner =
+    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>;
 
 pub struct LsmIterator {
     inner: LsmIteratorInner,
@@ -26,7 +30,7 @@ impl LsmIterator {
             end_bound,
         };
         iter.check_end_bound();
-        while iter.inner.is_valid() && iter.inner.value().is_empty() {
+        while iter.is_valid() && iter.inner.value().is_empty() {
             iter.next_inner()?;
         }
         Ok(iter)
@@ -50,6 +54,7 @@ impl LsmIterator {
             self.is_valid = false;
             return Ok(());
         }
+        self.check_end_bound();
         Ok(())
     }
 }
