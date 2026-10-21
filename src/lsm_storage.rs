@@ -136,6 +136,30 @@ impl MiniLsm {
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         self.inner.get(key)
     }
+
+    pub fn delete(&self, key: &[u8]) -> Result<()> {
+        self.inner.delete(key)
+    }
+
+    pub fn scan(
+        &self,
+        lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
+    ) -> Result<FusedIterator<LsmIterator>> {
+        self.inner.scan(lower, upper)
+    }
+
+    /// Only to be used in tests and cli demo.
+    pub fn force_flush(&self) -> Result<()> {
+        if !self.inner.state.read().memtable.is_empty() {
+            self.inner
+                .force_freeze_memtable(&self.inner.state_lock.lock())?;
+        }
+        if !self.inner.state.read().imm_memtables.is_empty() {
+            self.inner.force_flush_next_imm_memtable()?;
+        }
+        Ok(())
+    }
 }
 
 /// Represents the interface for the Lsm storage engine providing the api to access

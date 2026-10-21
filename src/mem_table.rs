@@ -49,6 +49,11 @@ impl MemTable {
         self.id
     }
 
+    /// Memtable map empty or not.
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     /// Returns the current approximate size of the memtable.
     pub fn approximate_size(&self) -> usize {
         self.approximate_size.load(Ordering::Relaxed)

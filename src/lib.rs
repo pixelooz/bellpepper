@@ -3,15 +3,11 @@
 
 mod block;
 mod compact;
-mod iterators;
+pub mod iterators;
 mod key;
-mod lsm_iterator;
-mod lsm_options;
-mod lsm_storage;
+pub mod lsm_iterator;
+pub mod lsm_options;
+pub mod lsm_storage;
 mod mem_table;
 mod table;
 mod tests;
-
-fn main() {
-    println!("Hello, world!");
-}
