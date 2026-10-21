@@ -28,7 +28,7 @@ impl LsmStorageInner {
         self: &Arc<Self>,
         rx: crossbeam_channel::Receiver<()>,
     ) -> Result<Option<JoinHandle<()>>> {
-        let inner = self.clone();
+        let inner = Arc::clone(self);
 
         let handle = thread::spawn(move || {
             let ticker = crossbeam_channel::tick(Duration::from_millis(50));

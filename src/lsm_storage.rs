@@ -8,9 +8,10 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
+    thread::JoinHandle,
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
@@ -84,6 +85,48 @@ fn sst_within_range(
         _ => {}
     }
     true
+}
+
+/// A thin wrapper around `LsmStorageInner` and the user interface for the Database.
+pub struct MiniLsm {
+    pub(crate) lsm_inner: Arc<LsmStorageInner>,
+
+    /// Notifies the l0 flush thread to stop working.
+    flush_notifier: crossbeam_channel::Sender<()>,
+
+    /// The handle for the flush thread.
+    flush_thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for MiniLsm {
+    fn drop(&mut self) {
+        self.flush_notifier.send(()).ok();
+    }
+}
+
+impl MiniLsm {
+    /// Start the storage engine by either loading an existing directory or creating a new
+    /// one if one doesn't exist.
+    pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Arc<Self>> {
+        let inner = Arc::new(LsmStorageInner::open(path, options)?);
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let flush_thread = inner.spawn_flush_thread(rx)?;
+        Ok(Arc::new(Self {
+            lsm_inner: inner,
+            flush_notifier: tx,
+            flush_thread: Mutex::new(flush_thread),
+        }))
+    }
+
+    /// Shuts down the flush and compaction thread by sending their receivers a message.
+    pub fn close(&self) -> Result<()> {
+        self.flush_notifier.send(()).ok();
+        let handle = self.flush_thread.lock().take();
+        if let Some(handle) = handle {
+            handle.join().map_err(|err| anyhow!("{:?}", err))?
+        }
+        Ok(())
+    }
 }
 
 /// Represents the interface for the Lsm storage engine providing the api to access
