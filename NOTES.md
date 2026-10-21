@@ -88,7 +88,7 @@ The SST encoding has the following layout.
 
 ## Day 5
 
-![week1-day5 overview](../assets/week1-05-overview.svg)
+![week1-day5 overview](assets/week1-05-overview.svg)
 
 **Read Path Invariants**
 
@@ -101,7 +101,7 @@ The SST encoding has the following layout.
 
 ## Day 6
 
-![week1-day5 overview](../assets/week1-05-overview.svg)
+![week1-day5 overview](assets/week1-05-overview.svg)
 
 **Write Path Invariants**
 
@@ -115,7 +115,7 @@ The SST encoding has the following layout.
 
 ## Day 7
 
-![week1-day7 overview](../assets/week1-07-overview.svg)
+![week1-day7 overview](assets/week1-07-overview.svg)
 
 **Optimization Invariants**
 
