@@ -1,13 +1,14 @@
 #[cfg(test)]
 mod tests {
-    use std::{ops::Bound, sync::Arc};
+    use std::{ops::Bound, sync::Arc, time::Duration};
 
     use bytes::Bytes;
     use tempfile::tempdir;
 
     use crate::{
+        iterators::StorageIterator,
         lsm_options::LsmStorageOptions,
-        lsm_storage::LsmStorageInner,
+        lsm_storage::{LsmStorageInner, MiniLsm},
         tests::harness::{check_lsm_iter_result_by_key, sync},
     };
 
@@ -131,5 +132,86 @@ mod tests {
         assert_eq!(storage.get(b"4").unwrap(), None);
         assert_eq!(storage.get(b"--").unwrap(), None);
         assert_eq!(storage.get(b"555").unwrap(), None);
+    }
+
+    #[test]
+    fn test_task2_auto_flush() {
+        let dir = tempdir().unwrap();
+        let storage =
+            MiniLsm::open(&dir, LsmStorageOptions::default_for_week1_day6_test()).unwrap();
+
+        let value = "1".repeat(1024); // 1KB
+
+        // approximately 6MB
+        for i in 0..6000 {
+            storage
+                .put(format!("{i}").as_bytes(), value.as_bytes())
+                .unwrap();
+        }
+
+        std::thread::sleep(Duration::from_millis(500));
+
+        assert!(!storage.inner.state.read().l0_ss_tables.is_empty());
+    }
+
+    #[test]
+    fn test_task3_sst_filter() {
+        let dir = tempdir().unwrap();
+        let storage = Arc::new(
+            LsmStorageInner::open(&dir, LsmStorageOptions::default_for_week1_test()).unwrap(),
+        );
+
+        for i in 1..=10000 {
+            if i % 1000 == 0 {
+                sync(&storage);
+            }
+            storage
+                .put(format!("{:05}", i).as_bytes(), b"2333333")
+                .unwrap();
+        }
+
+        let iter = storage.scan(Bound::Unbounded, Bound::Unbounded).unwrap();
+        assert!(
+            iter.num_active_iterators() >= 10,
+            "did you implement num_active_iterators? current active iterators = {}",
+            iter.num_active_iterators()
+        );
+        let max_num = iter.num_active_iterators();
+        let iter = storage
+            .scan(
+                Bound::Excluded(format!("{:05}", 10000).as_bytes()),
+                Bound::Unbounded,
+            )
+            .unwrap();
+        assert!(iter.num_active_iterators() < max_num);
+        let min_num = iter.num_active_iterators();
+        let iter = storage
+            .scan(
+                Bound::Unbounded,
+                Bound::Excluded(format!("{:05}", 1).as_bytes()),
+            )
+            .unwrap();
+        assert_eq!(iter.num_active_iterators(), min_num);
+        let iter = storage
+            .scan(
+                Bound::Unbounded,
+                Bound::Included(format!("{:05}", 0).as_bytes()),
+            )
+            .unwrap();
+        assert_eq!(iter.num_active_iterators(), min_num);
+        let iter = storage
+            .scan(
+                Bound::Included(format!("{:05}", 10001).as_bytes()),
+                Bound::Unbounded,
+            )
+            .unwrap();
+        assert_eq!(iter.num_active_iterators(), min_num);
+        let iter = storage
+            .scan(
+                Bound::Included(format!("{:05}", 5000).as_bytes()),
+                Bound::Excluded(format!("{:05}", 6000).as_bytes()),
+            )
+            .unwrap();
+        assert!(min_num <= iter.num_active_iterators() && iter.num_active_iterators() < max_num);
     }
 }

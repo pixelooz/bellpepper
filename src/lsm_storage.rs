@@ -89,7 +89,7 @@ fn sst_within_range(
 
 /// A thin wrapper around `LsmStorageInner` and the user interface for the Database.
 pub struct MiniLsm {
-    pub(crate) lsm_inner: Arc<LsmStorageInner>,
+    pub(crate) inner: Arc<LsmStorageInner>,
 
     /// Notifies the l0 flush thread to stop working.
     flush_notifier: crossbeam_channel::Sender<()>,
@@ -112,7 +112,7 @@ impl MiniLsm {
         let (tx, rx) = crossbeam_channel::unbounded();
         let flush_thread = inner.spawn_flush_thread(rx)?;
         Ok(Arc::new(Self {
-            lsm_inner: inner,
+            inner,
             flush_notifier: tx,
             flush_thread: Mutex::new(flush_thread),
         }))
@@ -120,12 +120,21 @@ impl MiniLsm {
 
     /// Shuts down the flush and compaction thread by sending their receivers a message.
     pub fn close(&self) -> Result<()> {
+        self.inner.sync_dir()?;
         self.flush_notifier.send(()).ok();
         let handle = self.flush_thread.lock().take();
         if let Some(handle) = handle {
             handle.join().map_err(|err| anyhow!("{:?}", err))?
         }
         Ok(())
+    }
+
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
+        self.inner.put(key, value)
+    }
+
+    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        self.inner.get(key)
     }
 }
 
@@ -302,7 +311,7 @@ impl LsmStorageInner {
             sst_id,
             Some(self.block_cache.clone()),
         )?);
-        // TODO: call sync later here
+        self.sync_dir()?;
         let mut state_guard = self.state.write();
         let mut snapshot = state_guard.as_ref().clone();
 
