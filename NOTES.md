@@ -112,3 +112,16 @@ The SST encoding has the following layout.
   front - the newest side - of the `l0_ss_tables` in one snapshot update.
 - SST optimization may only exclude a file when its key range cannot contribute to the user request. An optimization should not change
   query results.
+
+## Day 7
+
+![week1-day7 overview](../assets/week1-07-overview.svg)
+
+**Optimization Invariants**
+
+- A Bloom Filter negative result must be deterministic: An SST skipped after a negative probe cannot contain the key at all, but a positive
+  result may be false and therefore still require a lookup.
+- The builder and reader hash exactly the same key bytes with the same function.
+- Prefix encoding and then decoding reconstructs every original key exactly.
+- Each compressed key is defined relative to the first key in its block, so it can be decoded without decoding every preceeding entry.
+- These optimizations may change I/O counts and encoded sized, but never the key-value pairs returned from `get` or `scan`.
