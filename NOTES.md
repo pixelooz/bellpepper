@@ -1,6 +1,7 @@
 # Week 1
 
 **Overview**
+
 ![week2-overview](assets/week2-overview.svg)
 
 ## Day 1
@@ -277,6 +278,7 @@ You don't need any number theory here—it's a very simple practical reason:
 ## Week 2
 
 **Overview**
+
 ![week2-overview](assets/week2-overview.svg)
 
 ## Compaction
@@ -291,6 +293,7 @@ unless it can exploit a specific workload pattern. Because compaction happens in
 parameters as the workload changes. Compaction policy is therefore an explicit choice about which costs to trade for others.
 
 **Compaction Strategies:**
+
 ![compaction-triangle](assets/week2-00-triangle.svg)
 
 
