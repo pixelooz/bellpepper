@@ -1,5 +1,8 @@
 # Week 1
 
+**Overview**
+![week2-overview](assets/week2-overview.svg)
+
 ## Day 1
 One mutable memtable, followed by zero or more immutable memtables awaiting flush.
 
@@ -271,6 +274,11 @@ You don't need any number theory here—it's a very simple practical reason:
 
 ---
 
+## Week 2
+
+**Overview**
+![week2-overview](assets/week2-overview.svg)
+
 ## Compaction
 
 Write amplification is the ratio of total physical bytes written to the logical bytes flushed into the LSM tree. With no compaction, the ratio is 
@@ -284,3 +292,11 @@ parameters as the workload changes. Compaction policy is therefore an explicit c
 
 **Compaction Strategies:**
 ![compaction-triangle](assets/week2-00-triangle.svg)
+
+
+A common production workload begins with a high-throughput bulk ingest and later shifts to small online transactions. During ingestion, the engine 
+can favor low write amplification. Before serving the online workload, it can retune compaction for lower read amplification and reorganize the 
+existing data.
+
+For a time-series workload, users might append and expire data in time order. Such a pattern can have low amplification even with little compaction. 
+In practice, observe the workload and its requirements rather than selecting a policy from aggregate ratios alone.
