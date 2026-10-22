@@ -270,3 +270,17 @@ You don't need any number theory here—it's a very simple practical reason:
   copied that exact line: `let delta = (h >> 17) | (h << 15);`.
 
 ---
+
+## Compaction
+
+Write amplification is the ratio of total physical bytes written to the logical bytes flushed into the LSM tree. With no compaction, the ratio is 
+1x because each SST is written once and never rewritten. Compacting everything after every flush has very high write amplification: after 100 
+equal-sized flushes, the engine rewrites approximately 2 + 3 + … + 100 SSTs’ worth of data. It therefore writes about 5,000 SSTs’ worth for 100 
+SSTs of logical input, or roughly 50x write amplification.
+
+A good compaction strategy balances read, write, and space amplification. A general-purpose LSM storage engine cannot minimize all three simultaneously 
+unless it can exploit a specific workload pattern. Because compaction happens in the background, the engine can select a strategy and tune its 
+parameters as the workload changes. Compaction policy is therefore an explicit choice about which costs to trade for others.
+
+**Compaction Strategies:**
+![compaction-triangle](assets/week2-00-triangle.svg)
