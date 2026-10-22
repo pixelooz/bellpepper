@@ -1,3 +1,4 @@
+pub(crate) mod bloom;
 pub(crate) mod builder;
 pub(crate) mod iterator;
 
