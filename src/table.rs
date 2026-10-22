@@ -69,7 +69,7 @@ pub struct SsTable {
     pub(crate) file_object: FileObject,
 
     /// The meta blocks that hold the info for the data blocks.
-    pub(crate) block_metas: Vec<BlockMeta>,
+    pub(crate) blocks_meta: Vec<BlockMeta>,
 
     /// The offset that indicates the starting point for meta blocks in the file.
     pub(crate) meta_block_offset: usize,
@@ -98,7 +98,7 @@ impl SsTable {
             first_key: blocks_meta.first().unwrap().first_key.clone(),
             last_key: blocks_meta.last().unwrap().last_key.clone(),
             file_object: file,
-            block_metas: blocks_meta,
+            blocks_meta,
             meta_block_offset: bm_offset as usize,
             id,
             block_cache,
@@ -108,9 +108,9 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        let offset = self.block_metas[block_idx].offset as u64;
+        let offset = self.blocks_meta[block_idx].offset as u64;
         let offset_end = self
-            .block_metas
+            .blocks_meta
             .get(block_idx + 1)
             .map_or(self.meta_block_offset, |bm| bm.offset) as u64;
 
@@ -139,7 +139,7 @@ impl SsTable {
 
     /// Find the block that may contain `key`.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        self.block_metas
+        self.blocks_meta
             .partition_point(|bm| bm.first_key.as_key_slice() <= key)
             .saturating_sub(1)
     }
@@ -158,7 +158,7 @@ impl SsTable {
 
     /// Get number of data blocks.
     pub fn num_of_blocks(&self) -> usize {
-        self.block_metas.len()
+        self.blocks_meta.len()
     }
 
     /// The id of the current `SsTable`.
@@ -185,7 +185,7 @@ impl SsTable {
     ) -> Self {
         Self {
             file_object: FileObject(None, file_size),
-            block_metas: vec![],
+            blocks_meta: vec![],
             meta_block_offset: 0,
             id,
             block_cache: None,

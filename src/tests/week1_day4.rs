@@ -73,7 +73,7 @@ mod tests {
         let (_dir, sst) = generate_sst();
         assert!(sst.num_of_blocks() > 1);
 
-        for (block_idx, meta) in sst.block_metas.iter().enumerate() {
+        for (block_idx, meta) in sst.blocks_meta.iter().enumerate() {
             let mut iter =
                 BlockIterator::create_and_seek_to_first(sst.read_block(block_idx).unwrap());
             let first_key = Bytes::copy_from_slice(iter.key().raw_ref());
@@ -91,9 +91,9 @@ mod tests {
     #[test]
     fn test_sst_decode() {
         let (_dir, sst) = generate_sst();
-        let meta = sst.block_metas.clone();
+        let meta = sst.blocks_meta.clone();
         let new_sst = SsTable::open_for_test(sst.file_object).unwrap();
-        assert_eq!(new_sst.block_metas, meta);
+        assert_eq!(new_sst.blocks_meta, meta);
         assert_eq!(new_sst.first_key().raw_ref(), key_of(0).raw_ref());
         assert_eq!(
             new_sst.last_key().raw_ref(),

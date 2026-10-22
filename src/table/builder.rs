@@ -111,7 +111,7 @@ impl SsTableBuilder {
             first_key: self.block_metas.first().unwrap().first_key.clone(),
             last_key: self.block_metas.last().unwrap().last_key.clone(),
             file_object,
-            block_metas: self.block_metas,
+            blocks_meta: self.block_metas,
             meta_block_offset: meta_offset,
             id,
             block_cache,
