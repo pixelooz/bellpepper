@@ -67,6 +67,7 @@ mod tests {
         assert_eq!(bloom_1.filter, bloom_2.filter);
     }
 
+    #[test]
     fn test_task3_block_key_compression() {
         let mut builder = SsTableBuilder::new(128);
         for idx in 0..num_of_keys() {

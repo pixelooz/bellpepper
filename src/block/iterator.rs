@@ -28,6 +28,7 @@ pub struct BlockIterator {
 impl Block {
     fn get_first_key(&self) -> KeyVec {
         let mut buffer = &self.data[..];
+        buffer.get_u16(); // skipping the overlap bytes
         let key_len = usize::from(buffer.get_u16());
         let key = &buffer[..key_len];
         KeyVec::from_vec(key.to_vec())
@@ -121,13 +122,15 @@ impl BlockIterator {
     /// and updates the index for the current key value pair.
     fn seek_to_offset(&mut self, offset: usize) {
         let mut entries = &self.block.data[offset..];
-        let key_len = usize::from(entries.get_u16());
-        let key = &entries[..key_len];
+        let overlap_len = usize::from(entries.get_u16());
+        let rest_key_len = usize::from(entries.get_u16());
+        let rest_key = &entries[..rest_key_len];
         self.key.clear();
-        self.key.append(key);
-        entries.advance(key_len);
+        self.key.append(&self.first_key.raw_ref()[..overlap_len]);
+        self.key.append(rest_key);
+        entries.advance(rest_key_len);
         let value_len = usize::from(entries.get_u16());
-        let value_offset_begin = offset + SIZEOF_U16 + key_len + SIZEOF_U16;
+        let value_offset_begin = offset + SIZEOF_U16 * 3 + rest_key_len;
         let value_offset_end = value_offset_begin + value_len;
         self.value_range = (value_offset_begin, value_offset_end);
         entries.advance(value_len);

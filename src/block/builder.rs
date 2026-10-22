@@ -37,6 +37,10 @@ impl BlockBuilder {
     }
 
     /// Adds a key-value pair to the block. Returns false when the block is full.
+    ///
+    /// +-------------------+--------------------+---------------------+-----------------+-----------------+
+    /// | overlap_len (u16) | rest_key_len (u16) | rest_key (rest_len) | value_len (u16) | value (val_len) |
+    /// +-------------------+--------------------+---------------------+-----------------+-----------------+
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         assert!(!key.is_empty(), "key cannot be empty");
@@ -50,7 +54,7 @@ impl BlockBuilder {
         let entry_len = key
             .len()
             .saturating_add(value.len())
-            .saturating_add(SIZEOF_U16 * 2);
+            .saturating_add(SIZEOF_U16 * 3);
 
         let is_block_full = self.estimated_size().saturating_add(entry_len) > self.block_size;
         let is_offset_full = self.data.len() > usize::from(u16::MAX);
@@ -63,14 +67,32 @@ impl BlockBuilder {
             return false;
         };
         self.offsets.push(offset);
-        self.data.put_u16(key_len);
-        self.data.put(key.raw_ref());
+
+        let overlap = Self::compute_overlap(self.first_key.as_key_slice(), key);
+        let rest_key_len = key.len() - overlap;
+        let rest_key = &key.raw_ref()[overlap..];
+
+        self.data
+            .put_u16(u16::try_from(overlap).expect("overlap length too large"));
+        self.data
+            .put_u16(u16::try_from(rest_key_len).expect("rest_key_len too large"));
+        self.data.put(rest_key);
         self.data.put_u16(value_len);
         self.data.put(value);
         if self.first_key.is_empty() {
             self.first_key = key.to_key_vec();
         }
         true
+    }
+
+    /// Computes overlapping bytes between the keys.
+    fn compute_overlap(first_key: KeySlice, key: KeySlice) -> usize {
+        first_key
+            .raw_ref()
+            .iter()
+            .zip(key.raw_ref())
+            .take_while(|(a, b)| a == b)
+            .count()
     }
 
     /// Check if there is no key-value pair in the block.
