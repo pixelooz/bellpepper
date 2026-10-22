@@ -45,9 +45,6 @@ impl BlockBuilder {
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
         assert!(!key.is_empty(), "key cannot be empty");
 
-        let Ok(key_len) = u16::try_from(key.len()) else {
-            return false;
-        };
         let Ok(value_len) = u16::try_from(value.len()) else {
             return false;
         };
