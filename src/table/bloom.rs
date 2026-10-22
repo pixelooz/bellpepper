@@ -4,6 +4,7 @@ use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 
 /// Implements a bloom filter.
+#[derive(Debug)]
 pub struct Bloom {
     /// Data of filter in bits.
     pub(crate) filter: Bytes,
@@ -29,7 +30,7 @@ impl<T: AsRef<[u8]>> BitSlice for T {
     }
 
     fn bit_len(&self) -> usize {
-        self.as_ref().len()
+        self.as_ref().len() * 8
     }
 }
 

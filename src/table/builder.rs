@@ -7,7 +7,7 @@ use crate::{
     block::builder::BlockBuilder,
     key::{KeySlice, KeyVec},
     lsm_storage::BlockCache,
-    table::{BlockMeta, FileObject, SsTable},
+    table::{BlockMeta, FileObject, SsTable, bloom::Bloom},
 };
 
 /// Builds an [SsTable] from key value pairs.
@@ -99,6 +99,13 @@ impl SsTableBuilder {
         BlockMeta::encode_block_meta(&self.block_metas, &mut buffer)?;
         buffer.put_u32(u32::try_from(meta_offset).context("meta_offset is too large")?);
 
+        let bits_per_key = Bloom::bloom_bits_per_key(self.key_hashes.len(), 0.01);
+        let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
+        let bloom_offset = buffer.len();
+
+        bloom.encode(&mut buffer);
+        buffer.put_u32(u32::try_from(bloom_offset).context("bloom offset is too large")?);
+
         let file_object = FileObject::create_write(path.as_ref(), buffer)?;
         Ok(SsTable {
             first_key: self.block_metas.first().unwrap().first_key.clone(),
@@ -108,6 +115,7 @@ impl SsTableBuilder {
             meta_block_offset: meta_offset,
             id,
             block_cache,
+            bloom: Some(bloom),
         })
     }
 

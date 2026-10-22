@@ -254,12 +254,18 @@ impl LsmStorageInner {
             }
         }
         let mut sst_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
+        let hashed_key = farmhash::fingerprint32(search_key);
         for sst_id in &snapshot.l0_ss_tables {
             let Some(ss_table) = snapshot.ss_tables.get(sst_id).cloned() else {
                 bail!("SST doesn't exist for SST ID: {sst_id}")
             };
             if search_key < ss_table.first_key().raw_ref()
                 || search_key > ss_table.last_key().raw_ref()
+            {
+                continue;
+            }
+            if let Some(bloom) = &ss_table.bloom
+                && !bloom.may_contain(hashed_key)
             {
                 continue;
             }

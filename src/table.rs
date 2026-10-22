@@ -11,6 +11,7 @@ use crate::{
     block::Block,
     key::{KeyBytes, KeySlice},
     lsm_storage::BlockCache,
+    table::bloom::Bloom,
 };
 
 /// Represents the underlying file and its cached size.
@@ -78,44 +79,31 @@ pub struct SsTable {
 
     first_key: KeyBytes,
     last_key: KeyBytes,
-    // bloom and timestamps
+    pub(crate) bloom: Option<Bloom>,
 }
 
 impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let file_len = file.size();
-        let raw_bm_offset = file.read(file_len - 4, 4)?;
-        let block_meta_offset = u64::from((&raw_bm_offset[..]).get_u32());
-        let raw_block_meta = file.read(block_meta_offset, file_len - 4 - block_meta_offset)?;
-        let block_metas = BlockMeta::decode_block_meta(&raw_block_meta[..])?;
+        let bloom_raw_offset = file.read(file_len - 4, 4)?;
+        let bloom_offset = u64::from((&bloom_raw_offset[..]).get_u32());
+        let raw_bloom = file.read(bloom_offset, file_len - 4 - bloom_offset)?;
+        let bloom = Bloom::decode(&raw_bloom[..])?;
+        let bm_raw_offset = file.read(bloom_offset - 4, 4)?;
+        let bm_offset = u64::from((&bm_raw_offset[..]).get_u32());
+        let blocks_meta_raw = file.read(bm_offset, bloom_offset - 4 - bm_offset)?;
+        let blocks_meta = BlockMeta::decode_block_meta(&blocks_meta_raw[..])?;
         Ok(Self {
-            first_key: block_metas.first().unwrap().first_key.clone(),
-            last_key: block_metas.last().unwrap().last_key.clone(),
+            first_key: blocks_meta.first().unwrap().first_key.clone(),
+            last_key: blocks_meta.last().unwrap().last_key.clone(),
             file_object: file,
-            block_metas,
-            meta_block_offset: block_meta_offset as usize,
+            block_metas: blocks_meta,
+            meta_block_offset: bm_offset as usize,
             id,
             block_cache,
+            bloom: Some(bloom),
         })
-    }
-
-    /// Create a mock SST with only first key + last key metadata
-    pub fn create_meta_only(
-        id: usize,
-        file_size: u64,
-        first_key: KeyBytes,
-        last_key: KeyBytes,
-    ) -> Self {
-        Self {
-            file_object: FileObject(None, file_size),
-            block_metas: vec![],
-            meta_block_offset: 0,
-            id,
-            block_cache: None,
-            first_key,
-            last_key,
-        }
     }
 
     /// Read a block from the disk.
@@ -186,6 +174,25 @@ impl SsTable {
     #[cfg(test)]
     pub(crate) fn open_for_test(file: FileObject) -> Result<Self> {
         Self::open(0, None, file)
+    }
+
+    /// Create a mock SST with only first key + last key metadata
+    pub fn create_meta_only(
+        id: usize,
+        file_size: u64,
+        first_key: KeyBytes,
+        last_key: KeyBytes,
+    ) -> Self {
+        Self {
+            file_object: FileObject(None, file_size),
+            block_metas: vec![],
+            meta_block_offset: 0,
+            id,
+            block_cache: None,
+            first_key,
+            last_key,
+            bloom: None,
+        }
     }
 }
 
