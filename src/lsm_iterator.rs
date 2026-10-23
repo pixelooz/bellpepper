@@ -2,7 +2,8 @@ use std::ops::Bound;
 
 use crate::{
     iterators::{
-        StorageIterator, merge_iterator::MergeIterator, two_merge_iterators::TwoMergeIterator,
+        StorageIterator, concat_iterator::SstConcatIterator, merge_iterator::MergeIterator,
+        two_merge_iterators::TwoMergeIterator,
     },
     mem_table::MemTableIterator,
     table::iterator::SsTableIterator,
@@ -12,8 +13,10 @@ use anyhow::{Result, bail};
 use bytes::Bytes;
 
 /// Represents the inner type for the `LsmIterator`.
-type LsmIteratorInner =
-    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>;
+type LsmIteratorInner = TwoMergeIterator<
+    TwoMergeIterator<MergeIterator<MemTableIterator>, MergeIterator<SsTableIterator>>,
+    MergeIterator<SstConcatIterator>,
+>;
 
 pub struct LsmIterator {
     inner: LsmIteratorInner,
