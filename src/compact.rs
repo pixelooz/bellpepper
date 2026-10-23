@@ -61,13 +61,20 @@ pub(crate) enum CompactionController {
 
 impl CompactionController {
     pub fn generate_compaction_task(&self, snapshot: &LsmStorageState) -> Option<CompactionTask> {
-        use CompactionController as CC;
-        use CompactionTask as CT;
         match self {
-            CC::Leveled(ctrl) => ctrl.generate_compaction_task(snapshot).map(CT::Leveled),
-            CC::Simple(ctrl) => ctrl.generate_compaction_task(snapshot).map(CT::Simple),
-            CC::Tiered(ctrl) => ctrl.generate_compaction_task(snapshot).map(CT::Tiered),
-            CC::NoCompaction => unreachable!(),
+            CompactionController::Leveled(ctrl) => ctrl
+                .generate_compaction_task(snapshot)
+                .map(CompactionTask::Leveled),
+
+            CompactionController::Simple(ctrl) => ctrl
+                .generate_compaction_task(snapshot)
+                .map(CompactionTask::Simple),
+
+            CompactionController::Tiered(ctrl) => ctrl
+                .generate_compaction_task(snapshot)
+                .map(CompactionTask::Tiered),
+
+            CompactionController::NoCompaction => unreachable!(),
         }
     }
 
@@ -121,6 +128,7 @@ pub enum CompactionOptions {
 }
 
 impl LsmStorageInner {
+    /// Compacts all L0 and L1 SsTables in to a new set of L1 SsTables.
     pub fn force_full_compaction(&self) -> Result<()> {
         let snapshot = {
             let state_guard = self.state.read();
