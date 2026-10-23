@@ -34,7 +34,7 @@ pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 /// Represents the state of the storage engine with the current memtable, all the imm_memtables,
 /// and the ss_tables.
 #[derive(Debug, Clone)]
-pub(crate) struct LsmStorageState {
+pub struct LsmStorageState {
     /// The current/active memtable.
     pub memtable: Arc<MemTable>,
 
@@ -43,6 +43,10 @@ pub(crate) struct LsmStorageState {
 
     /// Level 0 SSTs, from latest to oldest.
     pub l0_ss_tables: Vec<usize>,
+
+    /// SsTables sorted by key range; L1-L_MAX for leveled compaction or tiers for tiered
+    /// compactions.
+    pub levels: Vec<(usize, Vec<usize>)>,
 
     /// SST objects.
     pub ss_tables: HashMap<usize, Arc<SsTable>>,
@@ -54,7 +58,8 @@ impl LsmStorageState {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
             l0_ss_tables: Vec::new(),
-            ss_tables: Default::default(),
+            levels: vec![(1, Vec::new())],
+            ss_tables: HashMap::new(),
         }
     }
 }
@@ -160,6 +165,10 @@ impl MiniLsm {
         }
         Ok(())
     }
+
+    pub fn force_full_compaction(&self) -> Result<()> {
+        self.inner.force_full_compaction()
+    }
 }
 
 /// Represents the interface for the Lsm storage engine providing the api to access
@@ -195,6 +204,10 @@ impl LsmStorageInner {
     /// Syncs the current file to disk.
     pub(super) fn sync_dir(&self) -> Result<()> {
         File::open(&self.path)?.sync_all()?;
+        Ok(())
+    }
+
+    pub fn new_txn(&self) -> Result<()> {
         Ok(())
     }
 

@@ -1,3 +1,5 @@
+use crate::compact::CompactionOptions;
+
 /// Options for initializing the Lsm storage engine.
 #[derive(Debug, Clone)]
 pub struct LsmStorageOptions {
@@ -9,6 +11,8 @@ pub struct LsmStorageOptions {
 
     /// Number of memtables allowed in memory before flushing them to L0.
     pub num_memtable_limit: usize,
+
+    pub compaction_options: CompactionOptions,
 }
 
 impl LsmStorageOptions {
@@ -17,6 +21,7 @@ impl LsmStorageOptions {
             block_size: 4096,
             target_sst_size: 2 << 20,
             num_memtable_limit: 50,
+            compaction_options: CompactionOptions::NoCompaction,
         }
     }
 
@@ -25,6 +30,7 @@ impl LsmStorageOptions {
             block_size: 4096,
             target_sst_size: 2 << 20,
             num_memtable_limit: 2,
+            compaction_options: CompactionOptions::NoCompaction,
         }
     }
     //

@@ -4,10 +4,10 @@ use anyhow::{Result, bail};
 use bytes::Bytes;
 
 use crate::{
-    iterators::StorageIterator,
+    iterators::{StorageIterator, merge_iterator::MergeIterator},
     key::KeySlice,
-    lsm_storage::{BlockCache, LsmStorageInner},
-    table::{SsTable, builder::SsTableBuilder},
+    lsm_storage::{BlockCache, LsmStorageInner, LsmStorageState},
+    table::{SsTable, builder::SsTableBuilder, iterator::SsTableIterator},
 };
 
 #[derive(Clone)]
@@ -163,4 +163,25 @@ pub fn sync(storage: &LsmStorageInner) {
         .force_freeze_memtable(&storage.state_lock.lock())
         .unwrap();
     storage.force_flush_next_imm_memtable().unwrap();
+}
+
+pub fn construct_merge_iterator_over_storage(
+    state: &LsmStorageState,
+) -> MergeIterator<SsTableIterator> {
+    let mut iters = Vec::new();
+    for t in &state.l0_ss_tables {
+        iters.push(Box::new(
+            SsTableIterator::create_and_seek_to_first(state.ss_tables.get(t).cloned().unwrap())
+                .unwrap(),
+        ));
+    }
+    for (_, files) in &state.levels {
+        for f in files {
+            iters.push(Box::new(
+                SsTableIterator::create_and_seek_to_first(state.ss_tables.get(f).cloned().unwrap())
+                    .unwrap(),
+            ));
+        }
+    }
+    MergeIterator::create(iters)
 }

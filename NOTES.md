@@ -303,3 +303,15 @@ existing data.
 
 For a time-series workload, users might append and expire data in time order. Such a pattern can have low amplification even with little compaction. 
 In practice, observe the workload and its requirements rather than selecting a policy from aggregate ratios alone.
+
+## Day 1
+
+**Invariants:**
+
+- When several inputs contain the same key, the iterator representing the newest source must win.
+- L0 may overlap, but the SST produced for L1 must be ordered and non-overlapping.
+- A tombstone may be discarded but only if we are at the lowest level and every upper source has already been considered, since we are doing full
+  compaction in this stage, the invariant holds.
+- Merging and writing output SSTs happens outside `state_lock`; installing the result happens while holding it, and must remove only the files named
+  by the task. An L0 SST flushed after the task has been created must remain in the new state.
+- If every entry is a tombstone compaction produces no SST rather than creating an empty one.

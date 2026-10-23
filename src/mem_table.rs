@@ -18,7 +18,7 @@ use crate::{iterators::StorageIterator, key::KeySlice, table::builder::SsTableBu
 /// exceeds the threshold it is written to the disk to the SSTable in a background process.
 /// The `Wal` ensures that written data is never lost due to a crash.
 #[derive(Debug)]
-pub(crate) struct MemTable {
+pub struct MemTable {
     map: Arc<SkipMap<Bytes, Bytes>>,
     // wal: Option<Wal>,
     id: usize,

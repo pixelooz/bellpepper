@@ -1,6 +1,12 @@
 use anyhow::Result;
 use bellpepper::{
-    iterators::StorageIterator, lsm_options::LsmStorageOptions, lsm_storage::MiniLsm,
+    compact::{
+        CompactionOptions, leveled::LeveledCompactionOptions,
+        simple_leveled::SimpleLeveledCompactionOptions, tiered::TieredCompactionOptions,
+    },
+    iterators::StorageIterator,
+    lsm_options::LsmStorageOptions,
+    lsm_storage::MiniLsm,
 };
 use bytes::Bytes;
 use clap::{Parser, ValueEnum};
@@ -295,31 +301,31 @@ fn main() -> Result<()> {
             block_size: 4096,
             target_sst_size: 2 << 20, // 2MB
             num_memtable_limit: 3,
-            // compaction_options: match args.compaction {
-            //     CompactionStrategy::None => CompactionOptions::NoCompaction,
-            //     CompactionStrategy::Simple => {
-            //         CompactionOptions::Simple(SimpleLeveledCompactionOptions {
-            //             size_ratio_percent: 200,
-            //             level0_file_num_compaction_trigger: 2,
-            //             max_levels: 4,
-            //         })
-            //     }
-            //     CompactionStrategy::Tiered => CompactionOptions::Tiered(TieredCompactionOptions {
-            //         num_tiers: 3,
-            //         max_size_amplification_percent: 200,
-            //         size_ratio: 1,
-            //         min_merge_width: 2,
-            //         max_merge_width: None,
-            //     }),
-            //     CompactionStrategy::Leveled => {
-            //         CompactionOptions::Leveled(LeveledCompactionOptions {
-            //             level0_file_num_compaction_trigger: 2,
-            //             max_levels: 4,
-            //             base_level_size_mb: 128,
-            //             level_size_multiplier: 2,
-            //         })
-            //     }
-            // },
+            compaction_options: match args.compaction {
+                CompactionStrategy::None => CompactionOptions::NoCompaction,
+                CompactionStrategy::Simple => {
+                    CompactionOptions::Simple(SimpleLeveledCompactionOptions {
+                        size_ratio_percent: 200,
+                        level0_file_num_compaction_trigger: 2,
+                        max_levels: 4,
+                    })
+                }
+                CompactionStrategy::Tiered => CompactionOptions::Tiered(TieredCompactionOptions {
+                    num_tiers: 3,
+                    max_size_amplification_percent: 200,
+                    size_ratio: 1,
+                    min_merge_width: 2,
+                    max_merge_width: None,
+                }),
+                CompactionStrategy::Leveled => {
+                    CompactionOptions::Leveled(LeveledCompactionOptions {
+                        level0_file_num_compaction_trigger: 2,
+                        max_levels: 4,
+                        base_level_size_mb: 128,
+                        level_size_multiplier: 2,
+                    })
+                }
+            },
             // enable_wal: args.enable_wal,
             // serializable: args.serializable,
         },
