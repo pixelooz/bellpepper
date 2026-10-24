@@ -23,7 +23,8 @@ use crate::{
         tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask},
     },
     iterators::{
-        StorageIterator, merge_iterator::MergeIterator, two_merge_iterators::TwoMergeIterator,
+        StorageIterator, concat_iterator::SstConcatIterator, merge_iterator::MergeIterator,
+        two_merge_iterators::TwoMergeIterator,
     },
     key::KeySlice,
     lsm_storage::{LsmStorageInner, LsmStorageState},
@@ -52,6 +53,7 @@ impl CompactionTask {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum CompactionController {
     Leveled(LeveledCompactionController),
     Tiered(TieredCompactionController),
@@ -171,6 +173,7 @@ impl LsmStorageInner {
             "some L0 SSTs in compaction task were missing from l0_ss_tables"
         );
         *self.state.write() = Arc::new(state);
+        self.sync_dir()?;
         drop(_state_lock);
         for old_id in l0_ss_tables.iter().chain(l1_ss_tables.iter()) {
             fs::remove_file(self.path_of_sst(*old_id))?;
@@ -179,7 +182,42 @@ impl LsmStorageInner {
     }
 
     fn trigger_compaction(&self) -> Result<()> {
-        unimplemented!()
+        let snapshot = {
+            let state_guard = self.state.read();
+            Arc::clone(&state_guard)
+        };
+        let Some(task) = self
+            .compaction_controller
+            .generate_compaction_task(&snapshot)
+        else {
+            return Ok(());
+        };
+        let new_ssts = self.compact(&task)?;
+        let output: Vec<_> = new_ssts.iter().map(|sst| sst.sst_id()).collect();
+
+        let _state_guard = self.state_lock.lock();
+        let mut snapshot = self.state.read().as_ref().clone();
+
+        for new_sst in new_ssts {
+            let prev = snapshot.ss_tables.insert(new_sst.sst_id(), new_sst);
+            assert!(prev.is_none(), "duplicate compacted SST ID");
+        }
+        let (mut snapshot, ids_to_remove) = self
+            .compaction_controller
+            .apply_compaction_result(&snapshot, &task, &output, false);
+
+        for sst_id in ids_to_remove.iter() {
+            let removed = snapshot.ss_tables.remove(sst_id);
+            assert!(removed.is_some(), "compacted SST missing from state");
+        }
+        *self.state.write() = Arc::new(snapshot);
+        self.sync_dir()?;
+        drop(_state_guard);
+        for sst_id in ids_to_remove {
+            fs::remove_file(self.path_of_sst(sst_id))?;
+        }
+        self.sync_dir()?;
+        Ok(())
     }
 
     /// Executes a `CompactionTask` and returns the newly generated `SsTable`s without modifying state.
@@ -188,37 +226,91 @@ impl LsmStorageInner {
             let state_guard = self.state.read();
             Arc::clone(&state_guard)
         };
-        if let CompactionTask::ForceFullCompaction {
-            l0_ss_tables,
-            l1_ss_tables,
-        } = task
-        {
-            let mut l0_iters = Vec::with_capacity(l0_ss_tables.len());
-            for sst_idx in l0_ss_tables {
-                let sst = snapshot
-                    .ss_tables
-                    .get(sst_idx)
-                    .cloned()
-                    .with_context(|| format!("missing L0 SST {sst_idx}"))?;
-                l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+        match task {
+            CompactionTask::ForceFullCompaction {
+                l0_ss_tables,
+                l1_ss_tables,
+            } => {
+                let mut l0_iters = Vec::with_capacity(l0_ss_tables.len());
+                for sst_id in l0_ss_tables {
+                    let sst = snapshot
+                        .ss_tables
+                        .get(sst_id)
+                        .cloned()
+                        .with_context(|| format!("missing L0 SST with ID {sst_id}"))?;
+                    l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                }
+                let mut l1_iters = Vec::new();
+                for sst_id in l1_ss_tables {
+                    let sst = snapshot
+                        .ss_tables
+                        .get(sst_id)
+                        .cloned()
+                        .with_context(|| format!("missing L1 SST with ID {sst_id}"))?;
+                    l1_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                }
+                let two_merge_iter = TwoMergeIterator::create(
+                    MergeIterator::create(l0_iters),
+                    MergeIterator::create(l1_iters),
+                )?;
+                self.compact_generate_sst_from_iter(two_merge_iter, task.compact_to_bottom_level())
             }
-            let mut l1_iters = Vec::new();
-            for sst_idx in l1_ss_tables {
-                let sst = snapshot
-                    .ss_tables
-                    .get(sst_idx)
-                    .cloned()
-                    .with_context(|| format!("missing L1 SST {sst_idx}"))?;
-                l1_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+            CompactionTask::Simple(SimpleLeveledCompactionTask {
+                upper_level,
+                upper_level_sst_ids,
+                lower_level,
+                lower_level_sst_ids,
+                is_lower_level_bottom_level,
+            }) => {
+                let mut lower_ssts = Vec::with_capacity(lower_level_sst_ids.len());
+                for sst_id in lower_level_sst_ids {
+                    let sst =
+                        snapshot.ss_tables.get(sst_id).cloned().with_context(|| {
+                            format!("missing L{lower_level} SST with ID {sst_id}")
+                        })?;
+                    lower_ssts.push(sst);
+                }
+                let lower_iter = SstConcatIterator::create_and_seek_to_first(lower_ssts)?;
+                match upper_level {
+                    Some(_) => {
+                        let mut upper_ssts = Vec::with_capacity(upper_level_sst_ids.len());
+                        for sst_id in upper_level_sst_ids {
+                            let sst = snapshot
+                                .ss_tables
+                                .get(sst_id)
+                                .cloned()
+                                .with_context(|| format!("missing L0 SST with ID {sst_id}"))?;
+                            upper_ssts.push(sst);
+                        }
+                        let upper_iter = SstConcatIterator::create_and_seek_to_first(upper_ssts)?;
+                        let two_merge_iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                        self.compact_generate_sst_from_iter(
+                            two_merge_iter,
+                            task.compact_to_bottom_level(),
+                        )
+                    }
+                    None => {
+                        let mut upper_iters = Vec::with_capacity(upper_level_sst_ids.len());
+                        for sst_id in upper_level_sst_ids {
+                            let sst = snapshot
+                                .ss_tables
+                                .get(sst_id)
+                                .cloned()
+                                .with_context(|| format!("missing L0 SST with ID {sst_id}"))?;
+                            upper_iters
+                                .push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                        }
+                        let upper_iter = MergeIterator::create(upper_iters);
+                        let two_merge_iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                        self.compact_generate_sst_from_iter(
+                            two_merge_iter,
+                            task.compact_to_bottom_level(),
+                        )
+                    }
+                }
             }
-            let two_merge_iter = TwoMergeIterator::create(
-                MergeIterator::create(l0_iters),
-                MergeIterator::create(l1_iters),
-            )?;
-            return self
-                .compact_generate_sst_from_iter(two_merge_iter, task.compact_to_bottom_level());
+            _ => unreachable!("not implemented yet"),
         }
-        unimplemented!("not implemented yet")
     }
 
     /// Drains a sorted iterator and builds targeted size SsTables on disk.

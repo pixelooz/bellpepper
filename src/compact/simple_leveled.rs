@@ -21,6 +21,7 @@ pub struct SimpleLeveledCompactionOptions {
     pub max_levels: usize,
 }
 
+#[derive(Debug)]
 pub struct SimpleLeveledCompactionController {
     options: SimpleLeveledCompactionOptions,
 }

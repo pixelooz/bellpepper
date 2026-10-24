@@ -326,8 +326,8 @@ fn main() -> Result<()> {
                     })
                 }
             },
-            // enable_wal: args.enable_wal,
-            // serializable: args.serializable,
+            enable_wal: args.enable_wal,
+            serializable: args.serializable,
         },
     )?;
 
