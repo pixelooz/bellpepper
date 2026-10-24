@@ -134,14 +134,14 @@ impl MiniLsm {
     pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Arc<Self>> {
         let inner = Arc::new(LsmStorageInner::open(path, options)?);
         let (tx1, rx1) = crossbeam_channel::unbounded();
-        let flush_thread = inner.spawn_flush_thread(rx1)?;
+        let compaction_thread = inner.spawn_compaction_thread(rx1)?;
         let (tx2, rx2) = crossbeam_channel::unbounded();
-        let compaction_thread = inner.spawn_compaction_thread(rx2)?;
+        let flush_thread = inner.spawn_flush_thread(rx2)?;
         Ok(Arc::new(Self {
             inner,
-            flush_notifier: tx1,
+            flush_notifier: tx2,
             flush_thread: Mutex::new(flush_thread),
-            compaction_notifier: tx2,
+            compaction_notifier: tx1,
             compaction_thread: Mutex::new(compaction_thread),
         }))
     }

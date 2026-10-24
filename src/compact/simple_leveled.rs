@@ -111,7 +111,7 @@ impl SimpleLeveledCompactionController {
                 );
             }
         }
-        let lower_ssts = &mut snapshot.levels[0].1;
+        let lower_ssts = &mut snapshot.levels[task.lower_level - 1].1;
         assert_eq!(
             *lower_ssts, task.lower_level_sst_ids,
             "upper level L{} SSTs changed during compaction",
