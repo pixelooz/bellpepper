@@ -59,7 +59,7 @@ impl LsmStorageState {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
             l0_ss_tables: Vec::new(),
-            levels: vec![(1, Vec::new())],
+            levels: vec![(0, Vec::new())],
             ss_tables: HashMap::new(),
         }
     }

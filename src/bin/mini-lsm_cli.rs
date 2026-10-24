@@ -306,7 +306,7 @@ fn main() -> Result<()> {
                 CompactionStrategy::Simple => {
                     CompactionOptions::Simple(SimpleLeveledCompactionOptions {
                         size_ratio_percent: 200,
-                        level0_file_num_compaction_trigger: 2,
+                        l0_file_num_compaction_trigger: 2,
                         max_levels: 4,
                     })
                 }
