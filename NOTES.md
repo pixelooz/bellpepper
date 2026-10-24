@@ -315,3 +315,12 @@ In practice, observe the workload and its requirements rather than selecting a p
 - Merging and writing output SSTs happens outside `state_lock`; installing the result happens while holding it, and must remove only the files named
   by the task. An L0 SST flushed after the task has been created must remain in the new state.
 - If every entry is a tombstone compaction produces no SST rather than creating an empty one.
+
+## Day 2
+
+**Invariants:**
+
+- L0 is ordered from newest to oldest and may overlap. Each level from L1 downward is one sorted, non-overlapping run.
+- In merge, upper level contains newer version and must win on duplicate keys. For L0, individual files also need newest to oldest priority.
+- Applying an L0 task removes exactly the files captured by the compaction not the files flushed after the task was created.
+- Tombstones are preserved until the task's lower level is the bottom most level.
