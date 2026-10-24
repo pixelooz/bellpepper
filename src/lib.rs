@@ -3,6 +3,7 @@
 
 mod block;
 pub mod compact;
+mod debug;
 pub mod iterators;
 mod key;
 pub mod lsm_iterator;

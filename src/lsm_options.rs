@@ -46,7 +46,7 @@ impl LsmStorageOptions {
             block_size: 4096,
             target_sst_size: 1 << 20, // 1MB
             num_memtable_limit: 2,
-            compaction_options: CompactionOptions::NoCompaction,
+            compaction_options,
             enable_wal: false,
             serializable: false,
         }

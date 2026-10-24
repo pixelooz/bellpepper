@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::sync::Arc;
+
+    use tempfile::tempdir;
 
     use crate::lsm_options::LsmStorageOptions;
     use crate::{lsm_storage::LsmStorageInner, mem_table::MemTable};
@@ -37,7 +39,7 @@ mod tests {
 
     #[test]
     fn test_task2_storage_integration() {
-        let dir = PathBuf::from("../../task2_storage_integration");
+        let dir = tempdir().unwrap();
         let opts = LsmStorageOptions::default_for_week1_test();
         let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
@@ -58,7 +60,7 @@ mod tests {
 
     #[test]
     fn test_task3_storage_integration() {
-        let dir = PathBuf::from("../../task2_storage_integration");
+        let dir = tempdir().unwrap();
         let opts = LsmStorageOptions::default_for_week1_test();
         let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
@@ -97,7 +99,7 @@ mod tests {
         opts.target_sst_size = 1024;
         opts.num_memtable_limit = 1000;
 
-        let dir = PathBuf::from("../../task2_storage_integration");
+        let dir = tempdir().unwrap();
         let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 
         for _ in 0..1000 {
@@ -117,7 +119,7 @@ mod tests {
 
     #[test]
     fn test_task4_storage_integration() {
-        let dir = PathBuf::from("../../task2_storage_integration");
+        let dir = tempdir().unwrap();
         let opts = LsmStorageOptions::default_for_week1_test();
         let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
         assert_eq!(&storage.get(b"0").unwrap(), &None);

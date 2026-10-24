@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use std::{ops::Bound, path::PathBuf, sync::Arc};
+    use std::{ops::Bound, sync::Arc};
 
     use bytes::Bytes;
+    use tempfile::tempdir;
 
     use crate::lsm_options::LsmStorageOptions;
     use crate::{
@@ -268,7 +269,7 @@ mod tests {
 
     #[test]
     fn test_task4_integration() {
-        let dir = PathBuf::from("../../task4_integration");
+        let dir = tempdir().unwrap();
         let opts = LsmStorageOptions::default_for_week1_test();
         let storage = Arc::new(LsmStorageInner::open(dir, opts).unwrap());
 

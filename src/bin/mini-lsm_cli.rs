@@ -319,7 +319,7 @@ fn main() -> Result<()> {
                 }),
                 CompactionStrategy::Leveled => {
                     CompactionOptions::Leveled(LeveledCompactionOptions {
-                        level0_file_num_compaction_trigger: 2,
+                        l0_file_num_compaction_trigger: 2,
                         max_levels: 4,
                         base_level_size_mb: 128,
                         level_size_multiplier: 2,
