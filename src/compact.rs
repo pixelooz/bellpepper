@@ -246,7 +246,7 @@ impl LsmStorageInner {
                 let inner_builder = builder.take().expect("None should've been caught");
                 let sst_id = self.next_sst_id();
                 new_ssts.push(Arc::new(inner_builder.build(
-                    self.path_of_sst(sst_id).as_path(),
+                    self.path_of_sst(sst_id),
                     sst_id,
                     Some(self.block_cache.clone()),
                 )?))
