@@ -115,10 +115,10 @@ impl ReplHandler {
                 self.lsm.force_flush()?;
                 println!("flush success");
             }
-            // Command::FullCompaction => {
-            //     self.lsm.force_full_compaction()?;
-            //     println!("full compaction success");
-            // }
+            Command::FullCompaction => {
+                self.lsm.force_full_compaction()?;
+                println!("full compaction success");
+            }
             Command::Quit | Command::Close => {
                 self.lsm.close()?;
                 std::process::exit(0);
@@ -150,7 +150,7 @@ enum Command {
 
     // Dump,
     Flush,
-    // FullCompaction,
+    FullCompaction,
     Quit,
     Close,
 }
@@ -206,7 +206,7 @@ impl Command {
             scan,
             // map(tag_no_case("dump"), |_| Command::Dump),
             map(tag_no_case("flush"), |_| Command::Flush),
-            // map(tag_no_case("full_compaction"), |_| Command::FullCompaction),
+            map(tag_no_case("full_compaction"), |_| Command::FullCompaction),
             map(tag_no_case("quit"), |_| Command::Quit),
             map(tag_no_case("close"), |_| Command::Close),
         ));
