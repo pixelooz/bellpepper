@@ -46,12 +46,12 @@ pub struct LsmStorageState {
     /// Immutable memtables, from latest to earliest.
     pub imm_memtables: Vec<Arc<MemTable>>,
     /// L0 SSTs, from latest to earliest.
-    pub l0_sstables: Vec<usize>,
+    pub l0_ss_tables: Vec<usize>,
     /// SsTables sorted by key range; L1 - L_max for leveled compaction, or tiers for tiered
     /// compaction.
     pub levels: Vec<(usize, Vec<usize>)>,
     /// SST objects.
-    pub sstables: HashMap<usize, Arc<SsTable>>,
+    pub ss_tables: HashMap<usize, Arc<SsTable>>,
 }
 
 pub enum WriteBatchRecord<T: AsRef<[u8]>> {
@@ -73,9 +73,9 @@ impl LsmStorageState {
         Self {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
-            l0_sstables: Vec::new(),
+            l0_ss_tables: Vec::new(),
             levels,
-            sstables: Default::default(),
+            ss_tables: Default::default(),
         }
     }
 }

@@ -131,9 +131,9 @@ impl MockStorage {
         let snapshot = LsmStorageState {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
-            l0_sstables: Vec::new(),
+            l0_ss_tables: Vec::new(),
             levels: Vec::new(),
-            sstables: Default::default(),
+            ss_tables: Default::default(),
         };
         Self {
             snapshot,
@@ -152,7 +152,7 @@ impl MockStorage {
 
     pub fn flush_sst_to_l0(&mut self) -> usize {
         let id = self.generate_sst_id();
-        self.snapshot.l0_sstables.push(id);
+        self.snapshot.l0_ss_tables.push(id);
         self.file_list.insert(id, id);
         self.total_flushes += 1;
         self.total_writes += 1;
@@ -178,8 +178,8 @@ impl MockStorage {
         for (level, files) in &self.snapshot.levels {
             if files.len() >= 2 {
                 for id in 0..(files.len() - 1) {
-                    let this_file = self.snapshot.sstables[&files[id]].clone();
-                    let next_file = self.snapshot.sstables[&files[id + 1]].clone();
+                    let this_file = self.snapshot.ss_tables[&files[id]].clone();
+                    let next_file = self.snapshot.ss_tables[&files[id + 1]].clone();
                     if this_file.last_key() >= next_file.first_key() {
                         panic!(
                             "invalid file arrangement in L{}: id={}, range={:x}..={:x}; id={}, range={:x}..={:x}",
@@ -198,7 +198,7 @@ impl MockStorage {
     }
 
     pub fn dump_size_only(&self) {
-        print!("Levels: {}", self.snapshot.l0_sstables.len());
+        print!("Levels: {}", self.snapshot.l0_ss_tables.len());
         for (_, files) in &self.snapshot.levels {
             print!(" {}", files.len());
         }
@@ -206,11 +206,11 @@ impl MockStorage {
     }
 
     pub fn dump_original_id(&self, always_show_l0: bool, with_key: bool) {
-        if !self.snapshot.l0_sstables.is_empty() || always_show_l0 {
+        if !self.snapshot.l0_ss_tables.is_empty() || always_show_l0 {
             println!(
                 "L0 ({}): {:?}",
-                self.snapshot.l0_sstables.len(),
-                self.snapshot.l0_sstables,
+                self.snapshot.l0_ss_tables.len(),
+                self.snapshot.l0_ss_tables,
             );
         }
         for (level, files) in &self.snapshot.levels {
@@ -226,11 +226,11 @@ impl MockStorage {
     }
 
     pub fn dump_real_id(&self, always_show_l0: bool, with_key: bool) {
-        if !self.snapshot.l0_sstables.is_empty() || always_show_l0 {
+        if !self.snapshot.l0_ss_tables.is_empty() || always_show_l0 {
             println!(
                 "L0 ({}): {:?}",
-                self.snapshot.l0_sstables.len(),
-                self.snapshot.l0_sstables,
+                self.snapshot.l0_ss_tables.len(),
+                self.snapshot.l0_ss_tables,
             );
         }
         for (level, files) in &self.snapshot.levels {
@@ -382,7 +382,7 @@ fn main() {
                 );
                 println!(
                     "Read Amplification: {}x",
-                    storage.snapshot.l0_sstables.len()
+                    storage.snapshot.l0_ss_tables.len()
                         + storage
                             .snapshot
                             .levels
@@ -483,7 +483,7 @@ fn main() {
                 );
                 println!(
                     "Read Amplification: {}x",
-                    storage.snapshot.l0_sstables.len()
+                    storage.snapshot.l0_ss_tables.len()
                         + storage
                             .snapshot
                             .levels
@@ -523,7 +523,7 @@ fn main() {
                 println!("=== Iteration {i} ===");
                 let id = storage.flush_sst_to_l0();
                 let (first_key, last_key) = generate_random_key_range(&mut rng);
-                storage.snapshot.sstables.insert(
+                storage.snapshot.ss_tables.insert(
                     id,
                     Arc::new(SsTable::create_meta_only(
                         id,
@@ -556,8 +556,8 @@ fn main() {
                         .iter()
                         .chain(task.lower_level_sst_ids.iter())
                     {
-                        first_keys.push(storage.snapshot.sstables[file].first_key().clone());
-                        last_keys.push(storage.snapshot.sstables[file].last_key().clone());
+                        first_keys.push(storage.snapshot.ss_tables[file].first_key().clone());
+                        last_keys.push(storage.snapshot.ss_tables[file].last_key().clone());
                     }
                     let begin = first_keys.into_iter().min().unwrap();
                     let end = last_keys.into_iter().max().unwrap();
@@ -572,7 +572,7 @@ fn main() {
                         sst_ids.push(new_sst_id);
                         storage.file_list.insert(new_sst_id, *file);
                         storage.total_writes += 1;
-                        storage.snapshot.sstables.insert(
+                        storage.snapshot.ss_tables.insert(
                             new_sst_id,
                             Arc::new(SsTable::create_meta_only(
                                 new_sst_id,
@@ -590,11 +590,11 @@ fn main() {
                             .map(|id| format!(
                                 "{}.sst {:x}..={:x}",
                                 id,
-                                storage.snapshot.sstables[id]
+                                storage.snapshot.ss_tables[id]
                                     .first_key()
                                     .for_testing_key_ref()
                                     .get_u64(),
-                                storage.snapshot.sstables[id]
+                                storage.snapshot.ss_tables[id]
                                     .last_key()
                                     .for_testing_key_ref()
                                     .get_u64()
@@ -610,11 +610,11 @@ fn main() {
                             .map(|id| format!(
                                 "{}.sst {:x}..={:x}",
                                 id,
-                                storage.snapshot.sstables[id]
+                                storage.snapshot.ss_tables[id]
                                     .first_key()
                                     .for_testing_key_ref()
                                     .get_u64(),
-                                storage.snapshot.sstables[id]
+                                storage.snapshot.ss_tables[id]
                                     .last_key()
                                     .for_testing_key_ref()
                                     .get_u64()
@@ -629,11 +629,11 @@ fn main() {
                             .map(|id| format!(
                                 "{}.sst {:x}..={:x}",
                                 id,
-                                storage.snapshot.sstables[id]
+                                storage.snapshot.ss_tables[id]
                                     .first_key()
                                     .for_testing_key_ref()
                                     .get_u64(),
-                                storage.snapshot.sstables[id]
+                                storage.snapshot.ss_tables[id]
                                     .last_key()
                                     .for_testing_key_ref()
                                     .get_u64()
@@ -684,7 +684,7 @@ fn main() {
                 );
                 println!(
                     "Read Amplification: {}x",
-                    storage.snapshot.l0_sstables.len()
+                    storage.snapshot.l0_ss_tables.len()
                         + storage
                             .snapshot
                             .levels
