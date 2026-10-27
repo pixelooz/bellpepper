@@ -1,62 +1,62 @@
-use std::{
-    collections::HashMap,
-    fs::{self, File},
-    mem,
-    ops::Bound,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    thread::JoinHandle,
-};
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-use anyhow::{Context, Result, anyhow, bail};
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
+use std::collections::HashMap;
+use std::ops::Bound;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+
+use anyhow::Result;
 use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
-use crate::{
-    block::Block,
-    compact::{
-        CompactionController, CompactionOptions,
-        leveled::{LeveledCompactionController, LeveledCompactionOptions},
-        simple_leveled::{SimpleLeveledCompactionController, SimpleLeveledCompactionOptions},
-        tiered::TieredCompactionController,
-    },
-    iterators::{
-        StorageIterator, concat_iterator::SstConcatIterator, merge_iterator::MergeIterator,
-        two_merge_iterators::TwoMergeIterator,
-    },
-    key::KeySlice,
-    lsm_iterator::{FusedIterator, LsmIterator},
-    lsm_options::LsmStorageOptions,
-    mem_table::{MemTable, map_bound},
-    table::{SsTable, builder::SsTableBuilder, iterator::SsTableIterator},
+use crate::block::Block;
+use crate::compact::{
+    CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
+    SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::lsm_iterator::{FusedIterator, LsmIterator};
+use crate::manifest::Manifest;
+use crate::mem_table::MemTable;
+use crate::mvcc::LsmMvccInner;
+use crate::table::SsTable;
 
-/// A concurrent cache used for caching blocks to avoid reaching out to disk for commonly read blocks.
-/// Uses SST id and block index as keys to locate exact blocks to read and store them as cache.
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
-/// Represents the state of the storage engine with the current memtable, all the imm_memtables,
-/// and the ss_tables.
-#[derive(Debug, Clone)]
+/// Represents the state of the storage engine.
+#[derive(Clone)]
 pub struct LsmStorageState {
-    /// The current/active memtable.
+    /// The current memtable.
     pub memtable: Arc<MemTable>,
-
-    /// Immutable memtables, from latest to oldest.
+    /// Immutable memtables, from latest to earliest.
     pub imm_memtables: Vec<Arc<MemTable>>,
-
-    /// Level 0 SSTs, from latest to oldest.
-    pub l0_ss_tables: Vec<usize>,
-
-    /// SsTables sorted by key range; L1-L_MAX for leveled compaction or tiers for tiered
-    /// compactions.
+    /// L0 SSTs, from latest to earliest.
+    pub l0_sstables: Vec<usize>,
+    /// SsTables sorted by key range; L1 - L_max for leveled compaction, or tiers for tiered
+    /// compaction.
     pub levels: Vec<(usize, Vec<usize>)>,
-
     /// SST objects.
-    pub ss_tables: HashMap<usize, Arc<SsTable>>,
+    pub sstables: HashMap<usize, Arc<SsTable>>,
+}
+
+pub enum WriteBatchRecord<T: AsRef<[u8]>> {
+    Put(T, T),
+    Del(T),
 }
 
 impl LsmStorageState {
@@ -73,70 +73,113 @@ impl LsmStorageState {
         Self {
             memtable: Arc::new(MemTable::create(0)),
             imm_memtables: Vec::new(),
-            l0_ss_tables: Vec::new(),
+            l0_sstables: Vec::new(),
             levels,
-            ss_tables: Default::default(),
+            sstables: Default::default(),
         }
     }
 }
 
-/// Checks whether than user bounds are within the SST's bounds.
-fn sst_within_range(
-    lower: Bound<&[u8]>,
-    upper: Bound<&[u8]>,
-    sst_lower: &KeySlice,
-    sst_upper: &KeySlice,
-) -> bool {
-    match lower {
-        Bound::Included(key) if key > sst_upper.raw_ref() => {
-            return false;
-        }
-        Bound::Excluded(key) if key >= sst_upper.raw_ref() => {
-            return false;
-        }
-        _ => {}
-    }
-    match upper {
-        Bound::Included(key) if key < sst_lower.raw_ref() => {
-            return false;
-        }
-        Bound::Excluded(key) if key <= sst_lower.raw_ref() => {
-            return false;
-        }
-        _ => {}
-    }
-    true
+#[derive(Debug, Clone)]
+pub struct LsmStorageOptions {
+    // Block size in bytes
+    pub block_size: usize,
+    // SST size in bytes, also the approximate memtable capacity limit
+    pub target_sst_size: usize,
+    // Maximum number of memtables in memory, flush to L0 when exceeding this limit
+    pub num_memtable_limit: usize,
+    pub compaction_options: CompactionOptions,
+    pub enable_wal: bool,
+    pub serializable: bool,
 }
 
-/// A thin wrapper around `LsmStorageInner` and the user interface for the Database.
+impl LsmStorageOptions {
+    pub fn default_for_week1_test() -> Self {
+        Self {
+            block_size: 4096,
+            target_sst_size: 2 << 20,
+            compaction_options: CompactionOptions::NoCompaction,
+            enable_wal: false,
+            num_memtable_limit: 50,
+            serializable: false,
+        }
+    }
+
+    pub fn default_for_week1_day6_test() -> Self {
+        Self {
+            block_size: 4096,
+            target_sst_size: 2 << 20,
+            compaction_options: CompactionOptions::NoCompaction,
+            enable_wal: false,
+            num_memtable_limit: 2,
+            serializable: false,
+        }
+    }
+
+    pub fn default_for_week2_test(compaction_options: CompactionOptions) -> Self {
+        Self {
+            block_size: 4096,
+            target_sst_size: 1 << 20, // 1MB
+            compaction_options,
+            enable_wal: false,
+            num_memtable_limit: 2,
+            serializable: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum CompactionFilter {
+    Prefix(Bytes),
+}
+
+/// The storage interface of the LSM tree.
+pub(crate) struct LsmStorageInner {
+    pub(crate) state: Arc<RwLock<Arc<LsmStorageState>>>,
+    pub(crate) state_lock: Mutex<()>,
+    path: PathBuf,
+    pub(crate) block_cache: Arc<BlockCache>,
+    next_sst_id: AtomicUsize,
+    pub(crate) options: Arc<LsmStorageOptions>,
+    pub(crate) compaction_controller: CompactionController,
+    pub(crate) manifest: Option<Manifest>,
+    pub(crate) mvcc: Option<LsmMvccInner>,
+    pub(crate) compaction_filters: Arc<Mutex<Vec<CompactionFilter>>>,
+}
+
+/// A thin wrapper for `LsmStorageInner` and the user interface for MiniLSM.
 pub struct MiniLsm {
     pub(crate) inner: Arc<LsmStorageInner>,
-    /// Notifies the l0 flush thread to stop working.
+    /// Notifies the L0 flush thread to stop working. (In week 1 day 6)
     flush_notifier: crossbeam_channel::Sender<()>,
-    /// The handle for the flush thread.
-    flush_thread: Mutex<Option<JoinHandle<()>>>,
-    /// Notifies the compaction thread to stop working.
+    /// The handle for the flush thread. (In week 1 day 6)
+    flush_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Notifies the compaction thread to stop working. (In week 2)
     compaction_notifier: crossbeam_channel::Sender<()>,
-    /// The handle for the compaction thread.
-    compaction_thread: Mutex<Option<JoinHandle<()>>>,
+    /// The handle for the compaction thread. (In week 2)
+    compaction_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Drop for MiniLsm {
     fn drop(&mut self) {
-        self.flush_notifier.send(()).ok();
         self.compaction_notifier.send(()).ok();
+        self.flush_notifier.send(()).ok();
     }
 }
 
 impl MiniLsm {
-    /// Start the storage engine by either loading an existing directory or creating a new
-    /// one if one doesn't exist.
+    pub fn close(&self) -> Result<()> {
+        unimplemented!()
+    }
+
+    /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
+    /// not exist.
     pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Arc<Self>> {
         let inner = Arc::new(LsmStorageInner::open(path, options)?);
-        let (tx1, rx1) = crossbeam_channel::unbounded();
-        let compaction_thread = inner.spawn_compaction_thread(rx1)?;
-        let (tx2, rx2) = crossbeam_channel::unbounded();
-        let flush_thread = inner.spawn_flush_thread(rx2)?;
+        let (tx1, rx) = crossbeam_channel::unbounded();
+        let compaction_thread = inner.spawn_compaction_thread(rx)?;
+        let (tx2, rx) = crossbeam_channel::unbounded();
+        let flush_thread = inner.spawn_flush_thread(rx)?;
         Ok(Arc::new(Self {
             inner,
             flush_notifier: tx2,
@@ -146,30 +189,32 @@ impl MiniLsm {
         }))
     }
 
-    /// Shuts down the flush and compaction thread by sending their receivers a message.
-    pub fn close(&self) -> Result<()> {
-        self.inner.sync_dir()?;
-        self.flush_notifier.send(()).ok();
-        self.compaction_notifier.send(()).ok();
-        if let Some(handle) = self.compaction_thread.lock().take() {
-            handle.join().map_err(|err| anyhow!("{:?}", err))?
-        }
-        if let Some(handle) = self.flush_thread.lock().take() {
-            handle.join().map_err(|err| anyhow!("{:?}", err))?
-        }
-        Ok(())
+    pub fn new_txn(&self) -> Result<()> {
+        self.inner.new_txn()
     }
 
-    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.inner.put(key, value)
+    pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        self.inner.write_batch(batch)
+    }
+
+    pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
+        self.inner.add_compaction_filter(compaction_filter)
     }
 
     pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
         self.inner.get(key)
     }
 
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
+        self.inner.put(key, value)
+    }
+
     pub fn delete(&self, key: &[u8]) -> Result<()> {
         self.inner.delete(key)
+    }
+
+    pub fn sync(&self) -> Result<()> {
+        self.inner.sync()
     }
 
     pub fn scan(
@@ -180,7 +225,7 @@ impl MiniLsm {
         self.inner.scan(lower, upper)
     }
 
-    /// Only to be used in tests and cli demo.
+    /// Only call this in test cases due to race conditions
     pub fn force_flush(&self) -> Result<()> {
         if !self.inner.state.read().memtable.is_empty() {
             self.inner
@@ -197,27 +242,21 @@ impl MiniLsm {
     }
 }
 
-/// Represents the interface for the Lsm storage engine providing the api to access
-/// the state of storage engine and perform operations.
-#[derive(Debug)]
-pub(crate) struct LsmStorageInner {
-    pub(crate) state: Arc<RwLock<Arc<LsmStorageState>>>,
-    pub(crate) state_lock: Mutex<()>,
-    path: PathBuf,
-    pub(crate) block_cache: Arc<BlockCache>,
-    next_sst_id: AtomicUsize,
-    pub(crate) options: LsmStorageOptions,
-    pub(crate) compaction_controller: CompactionController,
-}
-
 impl LsmStorageInner {
-    /// Opens the storage engine at the given path with the given options.
-    pub fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
-        if !path.as_ref().exists() {
-            fs::create_dir_all(&path).context("failed to create DB dir")?;
-        }
+    pub(crate) fn next_sst_id(&self) -> usize {
+        self.next_sst_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(crate) fn mvcc(&self) -> &LsmMvccInner {
+        self.mvcc.as_ref().unwrap()
+    }
+
+    /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
+    /// not exist.
+    pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
+        let path = path.as_ref();
         let state = LsmStorageState::create(&options);
-        let block_cache = Arc::new(BlockCache::new(1 << 20));
 
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
@@ -231,30 +270,50 @@ impl LsmStorageInner {
             ),
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
-        Ok(Self {
+
+        let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
-            path: path.as_ref().to_path_buf(),
-            block_cache,
+            path: path.to_path_buf(),
+            block_cache: Arc::new(BlockCache::new(1024)),
             next_sst_id: AtomicUsize::new(1),
-            options,
             compaction_controller,
-        })
+            manifest: None,
+            options: options.into(),
+            mvcc: None,
+            compaction_filters: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        Ok(storage)
     }
 
-    /// Syncs the current file to disk.
-    pub(super) fn sync_dir(&self) -> Result<()> {
-        File::open(&self.path)?.sync_all()?;
-        Ok(())
+    pub fn sync(&self) -> Result<()> {
+        unimplemented!()
     }
 
-    pub fn new_txn(&self) -> Result<()> {
-        Ok(())
+    pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
+        let mut compaction_filters = self.compaction_filters.lock();
+        compaction_filters.push(compaction_filter);
     }
 
-    /// Returns the next sst_id for the requested memtable.
-    pub(crate) fn next_sst_id(&self) -> usize {
-        self.next_sst_id.fetch_add(1, Ordering::SeqCst)
+    /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
+    pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+        unimplemented!()
+    }
+
+    /// Write a batch of data into the storage. Implement in week 2 day 7.
+    pub fn write_batch<T: AsRef<[u8]>>(&self, _batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        unimplemented!()
+    }
+
+    /// Put a key-value pair into the storage by writing into the current memtable.
+    pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
+        unimplemented!()
+    }
+
+    /// Remove a key from the storage by writing an empty value.
+    pub fn delete(&self, _key: &[u8]) -> Result<()> {
+        unimplemented!()
     }
 
     pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
@@ -273,265 +332,31 @@ impl LsmStorageInner {
         Self::path_of_wal_static(&self.path, id)
     }
 
-    /// Puts the given key value pair in the memtable and attempts to freeze the table if
-    /// size exceeds the threshold.
-    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        let approx_size = {
-            let state = self.state.read();
-            state.memtable.put(key, value)?;
-            state.memtable.approximate_size()
-        };
-        self.try_freeze(approx_size)?;
-        Ok(())
+    pub(super) fn sync_dir(&self) -> Result<()> {
+        unimplemented!()
     }
 
-    /// Returns the value for the given key as Some(x) or None if not present.
-    /// If the current memtable doesn't have the value, looks for it in the
-    /// immutable memtables.
-    pub fn get(&self, search_key: &[u8]) -> Result<Option<Bytes>> {
-        let snapshot = {
-            let guard = self.state.read();
-            Arc::clone(&guard)
-        };
-        if let Some(value) = snapshot.memtable.get(search_key) {
-            if value.is_empty() {
-                return Ok(None);
-            }
-            return Ok(Some(value));
-        }
-        for mmt in &snapshot.imm_memtables {
-            if let Some(value) = mmt.get(search_key) {
-                if value.is_empty() {
-                    return Ok(None);
-                }
-                return Ok(Some(value));
-            }
-        }
-        let mut sst_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
-        let hashed_key = farmhash::fingerprint32(search_key);
-        for sst_id in &snapshot.l0_ss_tables {
-            let Some(ss_table) = snapshot.ss_tables.get(sst_id).cloned() else {
-                bail!("SST doesn't exist for SST ID: {sst_id}")
-            };
-            if search_key < ss_table.first_key().raw_ref()
-                || search_key > ss_table.last_key().raw_ref()
-            {
-                continue;
-            }
-            if let Some(bloom) = &ss_table.bloom
-                && !bloom.may_contain(hashed_key)
-            {
-                continue;
-            }
-            let iter = SsTableIterator::create_and_seek_to_key(
-                ss_table,
-                KeySlice::from_slice(search_key),
-            )?;
-            sst_iters.push(Box::new(iter));
-        }
-        let sst_merge_iter = MergeIterator::create(sst_iters);
-
-        let mut lvl_iters = Vec::with_capacity(snapshot.levels.len());
-        for (_, lvl_sst_ids) in &snapshot.levels {
-            let mut lvl_ssts = Vec::with_capacity(lvl_sst_ids.len());
-            for sst_id in lvl_sst_ids {
-                let Some(sst) = snapshot.ss_tables.get(sst_id).cloned() else {
-                    bail!("SST does not exist for ID: {sst_id}");
-                };
-                if search_key < sst.first_key().raw_ref() || search_key > sst.last_key().raw_ref() {
-                    continue;
-                }
-                if let Some(bloom) = &sst.bloom
-                    && !bloom.may_contain(hashed_key)
-                {
-                    continue;
-                }
-                lvl_ssts.push(sst);
-            }
-            let concat_iter = SstConcatIterator::create_and_seek_to_key(
-                lvl_ssts,
-                KeySlice::from_slice(search_key),
-            )?;
-            lvl_iters.push(Box::new(concat_iter));
-        }
-        let two_merge_iter =
-            TwoMergeIterator::create(sst_merge_iter, MergeIterator::create(lvl_iters))?;
-        if two_merge_iter.is_valid() && two_merge_iter.key().raw_ref() == search_key {
-            let value = two_merge_iter.value();
-            if value.is_empty() {
-                return Ok(None);
-            }
-            return Ok(Some(Bytes::copy_from_slice(value)));
-        }
-        Ok(None)
-    }
-
-    /// Logically deletes the value for the given key by "replacing" the value with empty
-    /// value.
-    pub fn delete(&self, key: &[u8]) -> Result<()> {
-        self.put(key, b"")
-    }
-
-    /// Attempts to freeze the current memtable if estimated size exceeds threshold.
-    pub fn try_freeze(&self, estimated_size: usize) -> Result<()> {
-        if estimated_size >= self.options.target_sst_size {
-            let state_lock_guard = self.state_lock.lock();
-            let state_guard = self.state.read();
-            if state_guard.memtable.approximate_size() >= self.options.target_sst_size {
-                drop(state_guard);
-                self.force_freeze_memtable(&state_lock_guard)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Freezes the current memtable and replaces it with a fresh memtable, and inserts
-    /// the old one into `imm_memtables`.
-    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<()>) -> Result<()> {
-        let memtable_id = self.next_sst_id();
-        let new_memtable = Arc::new(MemTable::create(memtable_id));
-
-        let mut state_guard = self.state.write();
-        let mut snapshot = state_guard.as_ref().clone();
-
-        let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
-
-        snapshot.imm_memtables.insert(0, old_memtable);
-        *state_guard = Arc::new(snapshot);
-        Ok(())
+    /// Force freeze the current memtable to an immutable memtable
+    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+        unimplemented!()
     }
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        let _state_lock = self.state_lock.lock();
+        unimplemented!()
+    }
 
-        let last_memtable = {
-            let guard = self.state.read();
-            let Some(mmt) = guard.imm_memtables.last() else {
-                return Ok(());
-            };
-            Arc::clone(mmt)
-        };
-        let mut builder = SsTableBuilder::new(self.options.block_size);
-        last_memtable.flush(&mut builder)?;
-
-        let sst_id = last_memtable.id();
-        let sst = Arc::new(builder.build(
-            self.path_of_sst(sst_id),
-            sst_id,
-            Some(self.block_cache.clone()),
-        )?);
-        self.sync_dir()?;
-        let mut state_guard = self.state.write();
-        let mut snapshot = state_guard.as_ref().clone();
-
-        let memtable = snapshot
-            .imm_memtables
-            .pop()
-            .expect("empty should've returned above");
-
-        assert_eq!(
-            memtable.id(),
-            sst_id,
-            "last SST ID is not equal to popped SST ID"
-        );
-        snapshot.l0_ss_tables.insert(0, sst_id);
-        snapshot.ss_tables.insert(sst_id, sst);
-        *state_guard = Arc::new(snapshot);
+    pub fn new_txn(&self) -> Result<()> {
+        // no-op
         Ok(())
     }
 
-    /// Creates a point-in-time snapshot iterator over the specified key range.
-    /// It merges all in-memory tables, yielding the latest version of each key while skipping tombstones.
-    /// The returned `FusedIterator` is safe to use in a loop and will permanently halt if an error occurs.
+    /// Create an iterator over a range of keys.
     pub fn scan(
         &self,
-        lower: Bound<&[u8]>,
-        upper: Bound<&[u8]>,
+        _lower: Bound<&[u8]>,
+        _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let snapshot = {
-            let guard = self.state.read();
-            Arc::clone(&guard)
-        };
-        let mut memtable_iters = Vec::with_capacity(snapshot.imm_memtables.len() + 1);
-        memtable_iters.push(Box::new(snapshot.memtable.scan(lower, upper)));
-
-        for mmt in &snapshot.imm_memtables {
-            memtable_iters.push(Box::new(mmt.scan(lower, upper)));
-        }
-        let merged_mmt_iter = MergeIterator::create(memtable_iters);
-
-        let mut sst_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
-        for sst_id in &snapshot.l0_ss_tables {
-            let Some(ss_table) = snapshot.ss_tables.get(sst_id).cloned() else {
-                bail!("SST doesn't exist for SST ID: {sst_id}")
-            };
-            if !sst_within_range(
-                lower,
-                upper,
-                &ss_table.first_key().as_key_slice(),
-                &ss_table.last_key().as_key_slice(),
-            ) {
-                continue;
-            }
-            let sst_iter = match lower {
-                Bound::Excluded(key) => {
-                    let key = KeySlice::from_slice(key);
-                    let mut iter = SsTableIterator::create_and_seek_to_key(ss_table, key)?;
-                    if iter.is_valid() && key == iter.key() {
-                        iter.next()?;
-                    }
-                    iter
-                }
-                Bound::Included(key) => {
-                    let key = KeySlice::from_slice(key);
-                    SsTableIterator::create_and_seek_to_key(ss_table, key)?
-                }
-                Bound::Unbounded => SsTableIterator::create_and_seek_to_first(ss_table)?,
-            };
-            sst_iters.push(Box::new(sst_iter));
-        }
-        let merged_sst_iter = MergeIterator::create(sst_iters);
-
-        let mut lvl_iters = Vec::with_capacity(snapshot.levels.len());
-        for (_, lvl_sst_ids) in &snapshot.levels {
-            let mut lvl_ssts = Vec::with_capacity(lvl_sst_ids.len());
-            for sst_id in lvl_sst_ids {
-                let Some(sst) = snapshot.ss_tables.get(sst_id).cloned() else {
-                    bail!("SST does not exist for ID: {sst_id}");
-                };
-                if !sst_within_range(
-                    lower,
-                    upper,
-                    &sst.first_key().as_key_slice(),
-                    &sst.last_key().as_key_slice(),
-                ) {
-                    continue;
-                }
-                lvl_ssts.push(sst);
-            }
-            let concat_iter = match lower {
-                Bound::Excluded(key) => {
-                    let key = KeySlice::from_slice(key);
-                    let mut iter = SstConcatIterator::create_and_seek_to_key(lvl_ssts, key)?;
-                    while iter.is_valid() && iter.key() == key {
-                        iter.next()?;
-                    }
-                    iter
-                }
-                Bound::Included(key) => {
-                    let key = KeySlice::from_slice(key);
-                    SstConcatIterator::create_and_seek_to_key(lvl_ssts, key)?
-                }
-                Bound::Unbounded => SstConcatIterator::create_and_seek_to_first(lvl_ssts)?,
-            };
-            lvl_iters.push(Box::new(concat_iter));
-        }
-        let iter = TwoMergeIterator::create(merged_mmt_iter, merged_sst_iter)?;
-        let iter = TwoMergeIterator::create(iter, MergeIterator::create(lvl_iters))?;
-        Ok(FusedIterator::new(LsmIterator::new(
-            iter,
-            map_bound(upper),
-        )?))
+        unimplemented!()
     }
 }

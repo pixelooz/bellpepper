@@ -1,41 +1,39 @@
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 pub mod concat_iterator;
 pub mod merge_iterator;
-pub mod two_merge_iterators;
+pub mod two_merge_iterator;
 
-use anyhow::Result;
-
-/// The unified interface for sequential data access across the entire LSM tree.
 pub trait StorageIterator {
-    /// The type of key yielded by the iterator.
-    ///
-    /// By using a Generic Associated Type (GAT) with `'a`, we allow the iterator to yield
-    /// keys that are strictly tied to the lifetime of the `&self` borrow during `.key()`.
-    /// In practice, implementations use `KeySlice<'a>`, which guarantees zero-copy access.
     type KeyType<'a>: PartialEq + Eq + PartialOrd + Ord
     where
         Self: 'a;
 
-    /// Returns the key at the current iterator position.
-    ///
-    /// ***Note**: Calling this when `is_valid()` is false will typically panic.*
-    fn key(&self) -> Self::KeyType<'_>;
-
-    /// Returns the value at the current iterator position as a raw byte slice.
-    ///
-    /// ***Note**: Calling this when `is_valid()` is false will typically panic.*
+    /// Get the current value.
     fn value(&self) -> &[u8];
 
-    /// Returns `true` if the iterator is currently pointing to a valid key-value pair.
-    /// This is the primary condition used in `while iter.is_valid() { ... }` loops.
+    /// Get the current key.
+    fn key(&self) -> Self::KeyType<'_>;
+
+    /// Check if the current iterator is valid.
     fn is_valid(&self) -> bool;
 
-    /// Advances the iterator to the next key-value pair.
-    ///
-    /// Returns a `Result` because advancing the iterator might involve reading from disk,
-    /// which can fail (e.g., I/O errors or checksum mismatches).
-    fn next(&mut self) -> Result<()>;
+    /// Move to the next position.
+    fn next(&mut self) -> anyhow::Result<()>;
 
-    /// Returns the total number of underlying iterators currently active.
+    /// Number of underlying active iterators for this iterator.
     fn num_active_iterators(&self) -> usize {
         1
     }

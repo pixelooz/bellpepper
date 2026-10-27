@@ -1,15 +1,28 @@
-pub(crate) mod builder;
-pub(crate) mod iterator;
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-use std::mem;
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use bytes::{Buf, BufMut, Bytes};
+mod builder;
+mod iterator;
 
-pub(crate) const SIZEOF_U16: usize = mem::size_of::<u16>();
+pub use builder::BlockBuilder;
+use bytes::Bytes;
+pub use iterator::BlockIterator;
 
-/// A block is the smallest unit of read and caching in LSM tree. It is a collection of
-/// sorted key-value pairs.
-#[derive(Debug, Clone)]
+/// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 pub struct Block {
     pub(crate) data: Vec<u8>,
     pub(crate) offsets: Vec<u16>,
@@ -17,30 +30,13 @@ pub struct Block {
 
 impl Block {
     /// Encode the internal data to the data layout illustrated in the course
+    /// Note: You may want to recheck if any of the expected field is missing from your output
     pub fn encode(&self) -> Bytes {
-        let mut buffer = self.data.clone();
-        let entry_count = self.offsets.len();
-        for offset in &self.offsets {
-            buffer.put_u16(*offset);
-        }
-        buffer.put_u16(entry_count as u16);
-        buffer.into()
+        unimplemented!()
     }
 
     /// Decode from the data layout, transform the input `data` to a single `Block`
     pub fn decode(data: &[u8]) -> Self {
-        let entry_count = usize::from((&data[data.len() - SIZEOF_U16..]).get_u16());
-        assert!(entry_count > 0, "block has no entries");
-
-        let data_end = data.len() - SIZEOF_U16 - entry_count * SIZEOF_U16;
-        let offsets = data[data_end..data.len() - SIZEOF_U16]
-            .chunks(SIZEOF_U16)
-            .map(|mut offset| offset.get_u16())
-            .collect::<Vec<u16>>();
-        assert!(offsets.windows(2).all(|pair| pair[0] < pair[1]));
-        Self {
-            data: data[..data_end].to_vec(),
-            offsets,
-        }
+        unimplemented!()
     }
 }

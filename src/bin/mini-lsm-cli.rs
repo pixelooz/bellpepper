@@ -1,17 +1,33 @@
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+mod wrapper;
+
+use rustyline::DefaultEditor;
+use wrapper::mini_lsm_wrapper;
+
 use anyhow::Result;
-use bellpepper::{
-    compact::{
-        CompactionOptions, leveled::LeveledCompactionOptions,
-        simple_leveled::SimpleLeveledCompactionOptions, tiered::TieredCompactionOptions,
-    },
-    iterators::StorageIterator,
-    lsm_options::LsmStorageOptions,
-    lsm_storage::MiniLsm,
-};
 use bytes::Bytes;
 use clap::{Parser, ValueEnum};
-use rustyline::DefaultEditor;
-use std::{path::PathBuf, sync::Arc};
+use mini_lsm_wrapper::compact::{
+    CompactionOptions, LeveledCompactionOptions, SimpleLeveledCompactionOptions,
+    TieredCompactionOptions,
+};
+use mini_lsm_wrapper::iterators::StorageIterator;
+use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum CompactionStrategy {
@@ -107,10 +123,10 @@ impl ReplHandler {
                     println!("invalid command");
                 }
             },
-            // Command::Dump => {
-            //     self.lsm.dump_structure();
-            //     println!("dump success");
-            // }
+            Command::Dump => {
+                self.lsm.dump_structure();
+                println!("dump success");
+            }
             Command::Flush => {
                 self.lsm.force_flush()?;
                 println!("flush success");
@@ -148,7 +164,7 @@ enum Command {
         end: Option<String>,
     },
 
-    // Dump,
+    Dump,
     Flush,
     FullCompaction,
     Quit,
@@ -204,7 +220,7 @@ impl Command {
             del,
             get,
             scan,
-            // map(tag_no_case("dump"), |_| Command::Dump),
+            map(tag_no_case("dump"), |_| Command::Dump),
             map(tag_no_case("flush"), |_| Command::Flush),
             map(tag_no_case("full_compaction"), |_| Command::FullCompaction),
             map(tag_no_case("quit"), |_| Command::Quit),
@@ -306,7 +322,7 @@ fn main() -> Result<()> {
                 CompactionStrategy::Simple => {
                     CompactionOptions::Simple(SimpleLeveledCompactionOptions {
                         size_ratio_percent: 200,
-                        l0_file_num_compaction_trigger: 2,
+                        level0_file_num_compaction_trigger: 2,
                         max_levels: 4,
                     })
                 }
@@ -319,7 +335,7 @@ fn main() -> Result<()> {
                 }),
                 CompactionStrategy::Leveled => {
                     CompactionOptions::Leveled(LeveledCompactionOptions {
-                        l0_file_num_compaction_trigger: 2,
+                        level0_file_num_compaction_trigger: 2,
                         max_levels: 4,
                         base_level_size_mb: 128,
                         level_size_multiplier: 2,

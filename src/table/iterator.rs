@@ -1,77 +1,55 @@
-use anyhow::Result;
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+
 use std::sync::Arc;
 
-use crate::{
-    block::iterator::BlockIterator, iterators::StorageIterator, key::KeySlice, table::SsTable,
-};
+use anyhow::Result;
 
-/// An iterator over the contents of the [SsTable].
+use super::SsTable;
+use crate::{block::BlockIterator, iterators::StorageIterator, key::KeySlice};
+
+/// An iterator over the contents of an SSTable.
 pub struct SsTableIterator {
     table: Arc<SsTable>,
-    block_iterator: BlockIterator,
-    block_index: usize,
+    blk_iter: BlockIterator,
+    blk_idx: usize,
 }
 
 impl SsTableIterator {
     /// Create a new iterator and seek to the first key-value pair in the first data block.
     pub fn create_and_seek_to_first(table: Arc<SsTable>) -> Result<Self> {
-        let (index, block_iterator) = Self::seek_to_first_inner(&table)?;
-        Ok(Self {
-            table,
-            block_iterator,
-            block_index: index,
-        })
+        unimplemented!()
     }
 
     /// Seek to the first key-value pair in the first data block.
     pub fn seek_to_first(&mut self) -> Result<()> {
-        let (index, block_iterator) = Self::seek_to_first_inner(&self.table)?;
-        self.block_index = index;
-        self.block_iterator = block_iterator;
-        Ok(())
-    }
-
-    fn seek_to_first_inner(table: &Arc<SsTable>) -> Result<(usize, BlockIterator)> {
-        let block = table.read_block_cached(0)?;
-        let block_iterator = BlockIterator::create_and_seek_to_first(block);
-        Ok((0, block_iterator))
+        unimplemented!()
     }
 
     /// Create a new iterator and seek to the first key-value pair which >= `key`.
-    pub fn create_and_seek_to_key(table: Arc<SsTable>, search_key: KeySlice) -> Result<Self> {
-        let (index, block_iterator) = Self::seek_to_key_inner(&table, search_key)?;
-        Ok(Self {
-            table,
-            block_iterator,
-            block_index: index,
-        })
+    pub fn create_and_seek_to_key(table: Arc<SsTable>, key: KeySlice) -> Result<Self> {
+        unimplemented!()
     }
 
     /// Seek to the first key-value pair which >= `key`.
     /// Note: You probably want to review the handout for detailed explanation when implementing
     /// this function.
-    pub fn seek_to_key(&mut self, search_key: KeySlice) -> Result<()> {
-        let (index, block_iterator) = Self::seek_to_key_inner(&self.table, search_key)?;
-        self.block_index = index;
-        self.block_iterator = block_iterator;
-        Ok(())
-    }
-
-    fn seek_to_key_inner(
-        table: &Arc<SsTable>,
-        search_key: KeySlice,
-    ) -> Result<(usize, BlockIterator)> {
-        let mut block_idx = table.find_block_idx(search_key);
-        let mut block = table.read_block_cached(block_idx)?;
-        let mut block_iterator = BlockIterator::create_and_seek_to_key(block, search_key);
-        if !block_iterator.is_valid() {
-            block_idx += 1;
-            if block_idx < table.num_of_blocks() {
-                block = table.read_block_cached(block_idx)?;
-                block_iterator = BlockIterator::create_and_seek_to_first(block);
-            }
-        }
-        Ok((block_idx, block_iterator))
+    pub fn seek_to_key(&mut self, key: KeySlice) -> Result<()> {
+        unimplemented!()
     }
 }
 
@@ -80,31 +58,22 @@ impl StorageIterator for SsTableIterator {
 
     /// Return the `key` that's held by the underlying block iterator.
     fn key(&self) -> KeySlice<'_> {
-        self.block_iterator.key()
+        unimplemented!()
     }
 
     /// Return the `value` that's held by the underlying block iterator.
     fn value(&self) -> &[u8] {
-        self.block_iterator.value()
+        unimplemented!()
     }
 
     /// Return whether the current block iterator is valid or not.
     fn is_valid(&self) -> bool {
-        self.block_iterator.is_valid()
+        unimplemented!()
     }
 
     /// Move to the next `key` in the block.
     /// Note: You may want to check if the current block iterator is valid after the move.
     fn next(&mut self) -> Result<()> {
-        self.block_iterator.next();
-        if self.block_iterator.is_valid() {
-            return Ok(());
-        }
-        self.block_index += 1;
-        if self.block_index < self.table.num_of_blocks() {
-            let block = self.table.read_block_cached(self.block_index)?;
-            self.block_iterator = BlockIterator::create_and_seek_to_first(block);
-        }
-        Ok(())
+        unimplemented!()
     }
 }

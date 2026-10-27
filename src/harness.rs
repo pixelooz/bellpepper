@@ -1,6 +1,23 @@
+#![allow(dead_code)] // REMOVE THIS LINE once all modules are complete
+
+// Copyright (c) 2022-2025 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::{
     collections::BTreeMap,
     ops::Bound,
+    os::unix::fs::MetadataExt,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -11,14 +28,13 @@ use bytes::Bytes;
 
 use crate::{
     compact::{
-        CompactionOptions, leveled::LeveledCompactionOptions,
-        simple_leveled::SimpleLeveledCompactionOptions, tiered::TieredCompactionOptions,
+        CompactionOptions, LeveledCompactionOptions, SimpleLeveledCompactionOptions,
+        TieredCompactionOptions,
     },
     iterators::{StorageIterator, merge_iterator::MergeIterator},
-    key::KeySlice,
+    key::{KeySlice, TS_ENABLED},
     lsm_storage::{BlockCache, LsmStorageInner, LsmStorageState, MiniLsm},
-    mvcc::TS_ENABLED,
-    table::{SsTable, builder::SsTableBuilder, iterator::SsTableIterator},
+    table::{SsTable, SsTableBuilder, SsTableIterator},
 };
 
 #[derive(Clone)]
@@ -46,14 +62,109 @@ impl MockIterator {
     }
 }
 
-pub fn expect_iter_error(mut iter: impl StorageIterator) {
-    loop {
-        match iter.next() {
-            Ok(_) if iter.is_valid() => continue,
-            Ok(_) => panic!("expect an error"),
-            Err(_) => break,
+impl StorageIterator for MockIterator {
+    type KeyType<'a> = KeySlice<'a>;
+
+    fn next(&mut self) -> Result<()> {
+        if self.index < self.data.len() {
+            self.index += 1;
         }
+        if let Some(error_when) = self.error_when
+            && self.index == error_when
+        {
+            bail!("fake error!");
+        }
+        Ok(())
     }
+
+    fn key(&self) -> KeySlice<'_> {
+        if let Some(error_when) = self.error_when
+            && self.index >= error_when
+        {
+            panic!("invalid access after next returns an error!");
+        }
+        KeySlice::for_testing_from_slice_no_ts(self.data[self.index].0.as_ref())
+    }
+
+    fn value(&self) -> &[u8] {
+        if let Some(error_when) = self.error_when
+            && self.index >= error_when
+        {
+            panic!("invalid access after next returns an error!");
+        }
+        self.data[self.index].1.as_ref()
+    }
+
+    fn is_valid(&self) -> bool {
+        if let Some(error_when) = self.error_when
+            && self.index >= error_when
+        {
+            panic!("invalid access after next returns an error!");
+        }
+        self.index < self.data.len()
+    }
+}
+
+pub fn as_bytes(x: &[u8]) -> Bytes {
+    Bytes::copy_from_slice(x)
+}
+
+pub fn check_iter_result_by_key<I>(iter: &mut I, expected: Vec<(Bytes, Bytes)>)
+where
+    I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
+{
+    for (k, v) in expected {
+        assert!(iter.is_valid());
+        assert_eq!(
+            k,
+            iter.key().for_testing_key_ref(),
+            "expected key: {:?}, actual key: {:?}",
+            k,
+            as_bytes(iter.key().for_testing_key_ref()),
+        );
+        assert_eq!(
+            v,
+            iter.value(),
+            "expected value: {:?}, actual value: {:?}",
+            v,
+            as_bytes(iter.value()),
+        );
+        iter.next().unwrap();
+    }
+    assert!(
+        !iter.is_valid(),
+        "iterator should not be valid at the end of the check"
+    );
+}
+
+pub fn check_iter_result_by_key_and_ts<I>(iter: &mut I, expected: Vec<((Bytes, u64), Bytes)>)
+where
+    I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
+{
+    for ((k, ts), v) in expected {
+        assert!(iter.is_valid());
+        assert_eq!(
+            (&k[..], ts),
+            (
+                iter.key().for_testing_key_ref(),
+                iter.key().for_testing_ts()
+            ),
+            "expected key: {:?}@{}, actual key: {:?}@{}",
+            k,
+            ts,
+            as_bytes(iter.key().for_testing_key_ref()),
+            iter.key().for_testing_ts(),
+        );
+        assert_eq!(
+            v,
+            iter.value(),
+            "expected value: {:?}, actual value: {:?}",
+            v,
+            as_bytes(iter.value()),
+        );
+        iter.next().unwrap();
+    }
+    assert!(!iter.is_valid());
 }
 
 pub fn check_lsm_iter_result_by_key<I>(iter: &mut I, expected: Vec<(Bytes, Bytes)>)
@@ -81,46 +192,13 @@ where
     assert!(!iter.is_valid());
 }
 
-impl StorageIterator for MockIterator {
-    type KeyType<'a> = KeySlice<'a>;
-
-    fn next(&mut self) -> Result<()> {
-        if self.index < self.data.len() {
-            self.index += 1;
+pub fn expect_iter_error(mut iter: impl StorageIterator) {
+    loop {
+        match iter.next() {
+            Ok(_) if iter.is_valid() => continue,
+            Ok(_) => panic!("expect an error"),
+            Err(_) => break,
         }
-        if let Some(error_when) = self.error_when
-            && self.index == error_when
-        {
-            bail!("fake error!");
-        }
-        Ok(())
-    }
-
-    fn key(&self) -> KeySlice<'_> {
-        if let Some(error_when) = self.error_when
-            && self.index >= error_when
-        {
-            panic!("invalid access after next returns an error!");
-        }
-        KeySlice::from_slice(self.data[self.index].0.as_ref())
-    }
-
-    fn value(&self) -> &[u8] {
-        if let Some(error_when) = self.error_when
-            && self.index >= error_when
-        {
-            panic!("invalid access after next returns an error!");
-        }
-        self.data[self.index].1.as_ref()
-    }
-
-    fn is_valid(&self) -> bool {
-        if let Some(error_when) = self.error_when
-            && self.index >= error_when
-        {
-            panic!("invalid access after next returns an error!");
-        }
-        self.index < self.data.len()
     }
 }
 
@@ -132,41 +210,25 @@ pub fn generate_sst(
 ) -> SsTable {
     let mut builder = SsTableBuilder::new(128);
     for (key, value) in data {
-        builder.add(KeySlice::from_slice(&key[..]), &value[..]);
+        builder.add(KeySlice::for_testing_from_slice_no_ts(&key[..]), &value[..]);
     }
-    builder.build(path.as_ref(), id, block_cache).unwrap()
+    builder.build(id, block_cache, path.as_ref()).unwrap()
 }
 
-pub fn as_bytes(x: &[u8]) -> Bytes {
-    Bytes::copy_from_slice(x)
-}
-
-pub fn check_iter_result_by_key<I>(iter: &mut I, expected: Vec<(Bytes, Bytes)>)
-where
-    I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
-{
-    for (k, v) in expected {
-        assert!(iter.is_valid());
-        assert_eq!(
-            k,
-            iter.key().raw_ref(),
-            "expected key: {:?}, actual key: {:?}",
-            k,
-            as_bytes(iter.key().raw_ref()),
+pub fn generate_sst_with_ts(
+    id: usize,
+    path: impl AsRef<Path>,
+    data: Vec<((Bytes, u64), Bytes)>,
+    block_cache: Option<Arc<BlockCache>>,
+) -> SsTable {
+    let mut builder = SsTableBuilder::new(128);
+    for ((key, ts), value) in data {
+        builder.add(
+            KeySlice::for_testing_from_slice_with_ts(&key[..], ts),
+            &value[..],
         );
-        assert_eq!(
-            v,
-            iter.value(),
-            "expected value: {:?}, actual value: {:?}",
-            v,
-            as_bytes(iter.value()),
-        );
-        iter.next().unwrap();
     }
-    assert!(
-        !iter.is_valid(),
-        "iterator should not be valid at the end of the check"
-    );
+    builder.build(id, block_cache, path.as_ref()).unwrap()
 }
 
 pub fn sync(storage: &LsmStorageInner) {
@@ -174,27 +236,6 @@ pub fn sync(storage: &LsmStorageInner) {
         .force_freeze_memtable(&storage.state_lock.lock())
         .unwrap();
     storage.force_flush_next_imm_memtable().unwrap();
-}
-
-pub fn construct_merge_iterator_over_storage(
-    state: &LsmStorageState,
-) -> MergeIterator<SsTableIterator> {
-    let mut iters = Vec::new();
-    for t in &state.l0_ss_tables {
-        iters.push(Box::new(
-            SsTableIterator::create_and_seek_to_first(state.ss_tables.get(t).cloned().unwrap())
-                .unwrap(),
-        ));
-    }
-    for (_, files) in &state.levels {
-        for f in files {
-            iters.push(Box::new(
-                SsTableIterator::create_and_seek_to_first(state.ss_tables.get(f).cloned().unwrap())
-                    .unwrap(),
-            ));
-        }
-    }
-    MergeIterator::create(iters)
 }
 
 pub fn compaction_bench(storage: Arc<MiniLsm>) {
@@ -215,6 +256,7 @@ pub fn compaction_bench(storage: Arc<MiniLsm>) {
             max_key = max_key.max(i);
         }
     }
+
     std::thread::sleep(Duration::from_secs(1)); // wait until all memtables flush
     while {
         let snapshot = storage.inner.state.read();
@@ -222,6 +264,7 @@ pub fn compaction_bench(storage: Arc<MiniLsm>) {
     } {
         storage.inner.force_flush_next_imm_memtable().unwrap();
     }
+
     let compaction_deadline = Instant::now() + Duration::from_secs(60);
     loop {
         let snapshot = storage.inner.state.read().clone();
@@ -240,6 +283,7 @@ pub fn compaction_bench(storage: Arc<MiniLsm>) {
         println!("waiting for compaction to converge");
         std::thread::sleep(Duration::from_secs(1));
     }
+
     let mut expected_key_value_pairs = Vec::new();
     for i in 0..(max_key + 40000) {
         let key = gen_key(i);
@@ -252,16 +296,16 @@ pub fn compaction_bench(storage: Arc<MiniLsm>) {
             assert!(value.is_none());
         }
     }
+
     check_lsm_iter_result_by_key(
         &mut storage.scan(Bound::Unbounded, Bound::Unbounded).unwrap(),
         expected_key_value_pairs,
     );
+
     storage.dump_structure();
 
     println!(
-        "This test case does not guarantee your compaction algorithm produces a LSM state as expected.
-        It only does minimal checks on the size of the levels. Please use the compaction simulator to
-        check if the compaction is correctly going on."
+        "This test case does not guarantee your compaction algorithm produces a LSM state as expected. It only does minimal checks on the size of the levels. Please use the compaction simulator to check if the compaction is correctly going on."
     );
 }
 
@@ -269,12 +313,12 @@ pub fn check_compaction_ratio(storage: Arc<MiniLsm>) {
     let state = storage.inner.state.read().clone();
     let compaction_options = storage.inner.options.compaction_options.clone();
     let mut level_size = Vec::new();
-    let l0_sst_num = state.l0_ss_tables.len();
+    let l0_sst_num = state.l0_sstables.len();
     for (_, files) in &state.levels {
         let size = match &compaction_options {
             CompactionOptions::Leveled(_) => files
                 .iter()
-                .map(|x| state.ss_tables.get(x).as_ref().unwrap().table_size())
+                .map(|x| state.sstables.get(x).as_ref().unwrap().table_size())
                 .sum::<u64>(),
             CompactionOptions::Simple(_) | CompactionOptions::Tiered(_) => files.len() as u64,
             _ => unreachable!(),
@@ -295,10 +339,10 @@ pub fn check_compaction_ratio(storage: Arc<MiniLsm>) {
         CompactionOptions::NoCompaction => unreachable!(),
         CompactionOptions::Simple(SimpleLeveledCompactionOptions {
             size_ratio_percent,
-            l0_file_num_compaction_trigger,
+            level0_file_num_compaction_trigger,
             max_levels,
         }) => {
-            assert!(l0_sst_num < l0_file_num_compaction_trigger);
+            assert!(l0_sst_num < level0_file_num_compaction_trigger);
             assert!(level_size.len() <= max_levels);
             for idx in 1..level_size.len() {
                 let prev_size = level_size[idx - 1];
@@ -323,11 +367,11 @@ pub fn check_compaction_ratio(storage: Arc<MiniLsm>) {
         }
         CompactionOptions::Leveled(LeveledCompactionOptions {
             level_size_multiplier,
-            l0_file_num_compaction_trigger,
+            level0_file_num_compaction_trigger,
             max_levels,
             ..
         }) => {
-            assert!(l0_sst_num < l0_file_num_compaction_trigger);
+            assert!(l0_sst_num < level0_file_num_compaction_trigger);
             assert!(level_size.len() <= max_levels);
             let last_level_size = *level_size.last().unwrap();
             let mut multiplier = 1.0;
@@ -393,4 +437,37 @@ pub fn check_compaction_ratio(storage: Arc<MiniLsm>) {
             );
         }
     }
+}
+
+pub fn dump_files_in_dir(path: impl AsRef<Path>) {
+    println!("--- DIR DUMP ---");
+    for f in path.as_ref().read_dir().unwrap() {
+        let f = f.unwrap();
+        print!("{}", f.path().display());
+        println!(
+            ", size={:.3}KB",
+            f.metadata().unwrap().size() as f64 / 1024.0
+        );
+    }
+}
+
+pub fn construct_merge_iterator_over_storage(
+    state: &LsmStorageState,
+) -> MergeIterator<SsTableIterator> {
+    let mut iters = Vec::new();
+    for t in &state.l0_sstables {
+        iters.push(Box::new(
+            SsTableIterator::create_and_seek_to_first(state.sstables.get(t).cloned().unwrap())
+                .unwrap(),
+        ));
+    }
+    for (_, files) in &state.levels {
+        for f in files {
+            iters.push(Box::new(
+                SsTableIterator::create_and_seek_to_first(state.sstables.get(f).cloned().unwrap())
+                    .unwrap(),
+            ));
+        }
+    }
+    MergeIterator::create(iters)
 }

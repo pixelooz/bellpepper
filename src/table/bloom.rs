@@ -1,32 +1,44 @@
-use std::{cmp, f64};
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 use anyhow::Result;
 use bytes::{BufMut, Bytes, BytesMut};
 
-/// Implements a bloom filter.
-#[derive(Debug)]
+/// Implements a bloom filter
 pub struct Bloom {
-    /// Data of filter in bits.
+    /// data of filter in bits
     pub(crate) filter: Bytes,
-
-    /// Number of hash functions.
+    /// number of hash functions
     pub(crate) k: u8,
 }
 
 pub trait BitSlice {
-    fn get_bit(&self, bit_num: usize) -> bool;
+    fn get_bit(&self, idx: usize) -> bool;
     fn bit_len(&self) -> usize;
 }
 
 pub trait BitSliceMut {
-    fn set_bit(&mut self, bit_num: usize, value: bool);
+    fn set_bit(&mut self, idx: usize, val: bool);
 }
 
 impl<T: AsRef<[u8]>> BitSlice for T {
-    fn get_bit(&self, bit_num: usize) -> bool {
-        let index = bit_num / 8;
-        let offset = bit_num % 8;
-        self.as_ref()[index] & (1 << offset) != 0
+    fn get_bit(&self, idx: usize) -> bool {
+        let pos = idx / 8;
+        let offset = idx % 8;
+        (self.as_ref()[pos] & (1 << offset)) != 0
     }
 
     fn bit_len(&self) -> usize {
@@ -35,78 +47,71 @@ impl<T: AsRef<[u8]>> BitSlice for T {
 }
 
 impl<T: AsMut<[u8]>> BitSliceMut for T {
-    fn set_bit(&mut self, bit_num: usize, value: bool) {
-        let index = bit_num / 8;
-        let offset = bit_num % 8;
-        if value {
-            self.as_mut()[index] |= 1 << offset;
+    fn set_bit(&mut self, idx: usize, val: bool) {
+        let pos = idx / 8;
+        let offset = idx % 8;
+        if val {
+            self.as_mut()[pos] |= 1 << offset;
         } else {
-            self.as_mut()[index] &= !(1 << offset);
+            self.as_mut()[pos] &= !(1 << offset);
         }
     }
 }
 
 impl Bloom {
-    /// Encode a bloom filter.
-    pub fn encode(&self, buffer: &mut Vec<u8>) {
-        buffer.extend(&self.filter);
-        buffer.put_u8(self.k);
-    }
-
-    /// Decode a bloom filter.
-    pub fn decode(data: &[u8]) -> Result<Self> {
-        let filter = &data[..data.len() - 1];
-        let k = data[data.len() - 1];
+    /// Decode a bloom filter
+    pub fn decode(buf: &[u8]) -> Result<Self> {
+        let filter = &buf[..buf.len() - 1];
+        let k = buf[buf.len() - 1];
         Ok(Self {
             filter: filter.to_vec().into(),
             k,
         })
     }
 
-    /// Get bloom filter bits per key from entry count and false positive rates.
-    pub fn bloom_bits_per_key(entries: usize, false_positive_rates: f64) -> usize {
-        let size = -(entries as f64) * false_positive_rates.ln() / f64::consts::LN_2.powi(2);
-        let bits_per_key = (size / (entries as f64)).ceil();
-        bits_per_key as usize
+    /// Encode a bloom filter
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        buf.extend(&self.filter);
+        buf.put_u8(self.k);
     }
 
-    /// Build bloom filter from key hashes.
+    /// Get bloom filter bits per key from entries count and FPR
+    pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
+        let size = -(entries as f64) * false_positive_rate.ln() / std::f64::consts::LN_2.powi(2);
+        let locs = (size / (entries as f64)).ceil();
+        locs as usize
+    }
+
+    /// Build bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Self {
         let k = (bits_per_key as f64 * 0.69) as u32;
         let k = k.clamp(1, 30);
-        let n_bits = cmp::max(keys.len() * bits_per_key, 64);
-        let n_bytes = n_bits.div_ceil(8);
-        let n_bits = n_bytes * 8;
-        let mut filter = BytesMut::with_capacity(n_bytes);
-        filter.resize(n_bytes, 0);
-        for hash in keys {
-            let mut h = *hash;
-            let delta = h.rotate_left(15);
-            for _ in 0..k {
-                let bit_idx = (h as usize) % n_bits;
-                filter.set_bit(bit_idx, true);
-                h = h.wrapping_add(delta);
-            }
-        }
+        let nbits = (keys.len() * bits_per_key).max(64);
+        let nbytes = nbits.div_ceil(8);
+        let nbits = nbytes * 8;
+        let mut filter = BytesMut::with_capacity(nbytes);
+        filter.resize(nbytes, 0);
+
+        // TODO: build the bloom filter
+
         Self {
             filter: filter.freeze(),
             k: k as u8,
         }
     }
 
-    /// Check if the bloom filter may contain some data.
-    pub fn may_contain(&self, mut h: u32) -> bool {
-        if self.k <= 30 {
-            let n_bits = self.filter.bit_len();
+    /// Check if a bloom filter may contain some data
+    pub fn may_contain(&self, h: u32) -> bool {
+        if self.k > 30 {
+            // potential new encoding for short bloom filters
+            true
+        } else {
+            let nbits = self.filter.bit_len();
             let delta = h.rotate_left(15);
-            for _ in 0..self.k {
-                let bit_idx = (h as usize) % n_bits;
-                if !self.filter.get_bit(bit_idx) {
-                    return false;
-                }
-                h = h.wrapping_add(delta);
-            }
+
+            // TODO: probe the bloom filter
+
+            true
         }
-        true
     }
 }

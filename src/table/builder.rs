@@ -1,126 +1,72 @@
-use std::{mem, path::Path, sync::Arc};
+// Copyright (c) 2022-2026 Alex Chi Z
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-use anyhow::{Context, Result};
-use bytes::BufMut;
+#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
+#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use crate::{
-    block::builder::BlockBuilder,
-    key::{KeySlice, KeyVec},
-    lsm_storage::BlockCache,
-    table::{BlockMeta, FileObject, SsTable, bloom::Bloom},
-};
+use std::path::Path;
+use std::sync::Arc;
 
-/// Builds an [SsTable] from key value pairs.
+use anyhow::Result;
+
+use super::{BlockMeta, SsTable};
+use crate::{block::BlockBuilder, key::KeySlice, lsm_storage::BlockCache};
+
+/// Builds an SSTable from key-value pairs.
 pub struct SsTableBuilder {
-    /// The active 4KB block.
     builder: BlockBuilder,
-
-    /// The first key of the active block.
-    first_key: KeyVec,
-
-    /// The last key of the active block.
-    last_key: KeyVec,
+    first_key: Vec<u8>,
+    last_key: Vec<u8>,
     data: Vec<u8>,
-    pub(crate) block_metas: Vec<BlockMeta>,
+    pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
-
-    key_hashes: Vec<u32>,
 }
 
 impl SsTableBuilder {
     /// Create a builder based on target block size.
     pub fn new(block_size: usize) -> Self {
-        Self {
-            builder: BlockBuilder::new(block_size),
-            first_key: KeyVec::new(),
-            last_key: KeyVec::new(),
-            data: Vec::with_capacity(2 << 20),
-            block_metas: Vec::new(),
-            block_size,
-            key_hashes: Vec::new(),
-        }
+        unimplemented!()
     }
 
-    /// Adds a key-value pair to SSTable. Will split a new block when the current block is full.
+    /// Adds a key-value pair to SSTable.
+    ///
+    /// Note: You should split a new block when the current block is full.(`std::mem::replace` may
+    /// be helpful here)
     pub fn add(&mut self, key: KeySlice, value: &[u8]) {
-        if self.first_key.is_empty() {
-            self.first_key.set_from_slice(key);
-        }
-        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
-        if self.builder.add(key, value) {
-            self.last_key.set_from_slice(key);
-            return;
-        }
-        self.finish_block();
-        assert!(
-            self.builder.add(key, value),
-            "adding to a new block should never fail"
-        );
-        self.first_key.set_from_slice(key);
-        self.last_key.set_from_slice(key);
-    }
-
-    /// Replaces the old [BlockBuilder] with a new one and inserts the block meta into the SsTable
-    /// while computing and extending the crc32 checksum for the block.
-    fn finish_block(&mut self) {
-        let old_builder = mem::replace(&mut self.builder, BlockBuilder::new(self.block_size));
-        let enc_block = old_builder.build().encode();
-        let block_meta = BlockMeta {
-            offset: self.data.len(),
-            first_key: mem::take(&mut self.first_key).into_key_bytes(),
-            last_key: mem::take(&mut self.last_key).into_key_bytes(),
-        };
-        let checksum = crc32fast::hash(&enc_block);
-        self.block_metas.push(block_meta);
-        self.data.extend(enc_block);
-        self.data.put_u32(checksum);
+        unimplemented!()
     }
 
     /// Get the estimated size of the SSTable.
     ///
-    /// Since the data blocks contain much more data than meta blocks, just returns the size
-    /// of data blocks here.
+    /// Since the data blocks contain much more data than meta blocks, just return the size of data
+    /// blocks here.
     pub fn estimated_size(&self) -> usize {
-        self.data.len()
+        unimplemented!()
     }
 
-    /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure
-    /// to manipulate the disk objects.
+    /// Builds the SSTable and writes it to the given path. Use the `FileObject` structure to manipulate the disk objects.
     pub fn build(
-        mut self,
-        path: impl AsRef<Path>,
+        #[allow(unused_mut)] mut self,
         id: usize,
         block_cache: Option<Arc<BlockCache>>,
+        path: impl AsRef<Path>,
     ) -> Result<SsTable> {
-        self.finish_block();
-        let mut buffer = self.data;
-        let meta_offset = buffer.len();
-
-        BlockMeta::encode_block_meta(&self.block_metas, &mut buffer)?;
-        buffer.put_u32(u32::try_from(meta_offset).context("meta_offset is too large")?);
-
-        let bits_per_key = Bloom::bloom_bits_per_key(self.key_hashes.len(), 0.01);
-        let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
-        let bloom_offset = buffer.len();
-
-        bloom.encode(&mut buffer);
-        buffer.put_u32(u32::try_from(bloom_offset).context("bloom offset is too large")?);
-
-        let file_object = FileObject::create_write(path.as_ref(), buffer)?;
-        Ok(SsTable {
-            first_key: self.block_metas.first().unwrap().first_key.clone(),
-            last_key: self.block_metas.last().unwrap().last_key.clone(),
-            file_object,
-            blocks_meta: self.block_metas,
-            meta_block_offset: meta_offset,
-            id,
-            block_cache,
-            bloom: Some(bloom),
-        })
+        unimplemented!()
     }
 
     #[cfg(test)]
     pub(crate) fn build_for_test(self, path: impl AsRef<Path>) -> Result<SsTable> {
-        self.build(path, 0, None)
+        self.build(0, None, path)
     }
 }
