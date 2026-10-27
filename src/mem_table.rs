@@ -55,7 +55,7 @@ impl MemTable {
         Self {
             map: Arc::new(SkipMap::new()),
             wal: None,
-            id: id,
+            id,
             approximate_size: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -95,10 +95,6 @@ impl MemTable {
     }
 
     /// Put a key-value pair into the memtable.
-    ///
-    /// Week 1 Day 1: put the key-value pair into the in-memory map.
-    /// Week 2 Day 6: also append the data to the write-ahead log.
-    /// Week 3 Day 5: route the write through the batch WAL implementation.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         let approx_size = key.len() + value.len();
         self.map
