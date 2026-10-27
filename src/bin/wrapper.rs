@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod mini_lsm_wrapper {
-    pub use mini_lsm_starter::*;
+    pub use bellpepper::*;
 }
 
 #[allow(dead_code)]

@@ -24,7 +24,6 @@ use std::{
 use anyhow::Result;
 use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
-use ouroboros::self_referencing;
 use parking_lot::Mutex;
 
 use crate::{
@@ -71,14 +70,11 @@ impl Drop for Transaction {
 type SkipMapRangeIter<'a> =
     crossbeam_skiplist::map::Range<'a, Bytes, (Bound<Bytes>, Bound<Bytes>), Bytes, Bytes>;
 
-#[self_referencing]
 pub struct TxnLocalIterator {
+    /// Stores a skipmap iterator that refers to the lifetime of `TxnLocalIterator` itself.
+    iter: SkipMapRangeIter<'static>,
     /// Stores a reference to the skipmap.
     map: Arc<SkipMap<Bytes, Bytes>>,
-    /// Stores a skipmap iterator that refers to the lifetime of `TxnLocalIterator` itself.
-    #[borrows(map)]
-    #[not_covariant]
-    iter: SkipMapRangeIter<'this>,
     /// Stores the current key-value pair.
     item: (Bytes, Bytes),
 }

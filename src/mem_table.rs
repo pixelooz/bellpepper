@@ -23,7 +23,6 @@ use std::sync::atomic::AtomicUsize;
 use anyhow::Result;
 use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
-use ouroboros::self_referencing;
 
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
@@ -143,14 +142,11 @@ type SkipMapRangeIter<'a> =
 /// chapter for more information.
 ///
 /// This is part of week 1, day 2.
-#[self_referencing]
 pub struct MemTableIterator {
+    /// Stores a skipmap iterator that refers to the lifetime of `MemTableIterator` itself.
+    iter: SkipMapRangeIter<'static>,
     /// Stores a reference to the skipmap.
     map: Arc<SkipMap<Bytes, Bytes>>,
-    /// Stores a skipmap iterator that refers to the lifetime of `MemTableIterator` itself.
-    #[borrows(map)]
-    #[not_covariant]
-    iter: SkipMapRangeIter<'this>,
     /// Stores the current key-value pair.
     item: (Bytes, Bytes),
 }
