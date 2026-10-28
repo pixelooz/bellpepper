@@ -39,8 +39,8 @@ pub enum CompactionTask {
     Tiered(TieredCompactionTask),
     Simple(SimpleLeveledCompactionTask),
     ForceFullCompaction {
-        l0_sstables: Vec<usize>,
-        l1_sstables: Vec<usize>,
+        l0_ss_tables: Vec<usize>,
+        l1_ss_tables: Vec<usize>,
     },
 }
 
