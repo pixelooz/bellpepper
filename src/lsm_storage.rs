@@ -16,6 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use std::collections::HashMap;
+use std::mem;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -308,6 +309,14 @@ impl LsmStorageInner {
             }
             return Ok(Some(value));
         }
+        for imm_memtable in &snapshot.imm_memtables {
+            if let Some(value) = imm_memtable.get(key) {
+                if value.is_empty() {
+                    return Ok(None);
+                }
+                return Ok(Some(value));
+            }
+        }
         Ok(None)
     }
 
@@ -319,8 +328,12 @@ impl LsmStorageInner {
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         ensure!(!key.is_empty(), "key cannot be empty");
-        let guard = self.state.read();
-        guard.memtable.put(key, value)?;
+        let estimated_size = {
+            let guard = self.state.read();
+            guard.memtable.put(key, value)?;
+            guard.memtable.approximate_size()
+        };
+        self.try_freeze(estimated_size)?;
         Ok(())
     }
 
@@ -349,12 +362,31 @@ impl LsmStorageInner {
         unimplemented!()
     }
 
-    /// Force freeze the current memtable to an immutable memtable
-    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
-        unimplemented!()
+    fn try_freeze(&self, estimated_size: usize) -> Result<()> {
+        if estimated_size >= self.options.target_sst_size {
+            let state_lock_guard = self.state_lock.lock();
+            let state_guard = self.state.read();
+            if state_guard.memtable.approximate_size() >= self.options.target_sst_size {
+                drop(state_guard);
+                self.force_freeze_memtable(&state_lock_guard)?;
+            }
+        }
+        Ok(())
     }
 
-    /// Force flush the earliest-created immutable memtable to disk
+    /// Force freeze the current memtable to an immutable memtable.
+    pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
+        let next_sst_id = self.next_sst_id();
+        let new_memtable = Arc::new(MemTable::create(next_sst_id));
+        let mut state_guard = self.state.write();
+        let mut snapshot = state_guard.as_ref().clone();
+        let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
+        snapshot.imm_memtables.insert(0, old_memtable);
+        *state_guard = Arc::new(snapshot);
+        Ok(())
+    }
+
+    /// Force flush the earliest-created immutable memtable to disk.
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
         unimplemented!()
     }
