@@ -15,6 +15,7 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use std::mem;
 use std::ops::Bound;
 use std::path::Path;
 use std::sync::Arc;
@@ -117,8 +118,21 @@ impl MemTable {
     }
 
     /// Get an iterator over a range of keys.
-    pub fn scan(&self, _lower: Bound<&[u8]>, _upper: Bound<&[u8]>) -> MemTableIterator {
-        unimplemented!()
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
+        let map_iter = self.map.range((map_bound(lower), map_bound(upper)));
+
+        // SAFETY: self.map is heap-allocated behind an Arc, and MemTableIterator.
+        // co-owns a clone of "_map" that is dropped strictly after iter.
+        let static_iter =
+            unsafe { mem::transmute::<SkipMapRangeIter<'_>, SkipMapRangeIter<'static>>(map_iter) };
+
+        let mut iter = MemTableIterator {
+            iter: static_iter,
+            _map: Arc::clone(&self.map),
+            item: (Bytes::new(), Bytes::new()),
+        };
+        iter.next().unwrap();
+        iter
     }
 
     /// Flush the mem-table to SSTable. Implement in week 1 day 6.
@@ -149,10 +163,12 @@ type SkipMapRangeIter<'a> =
 ///
 /// This is part of week 1, day 2.
 pub struct MemTableIterator {
-    /// Stores a skipmap iterator that refers to the lifetime of `MemTableIterator` itself.
+    // SAFETY: `iter` borrows from the heap-allocated `SkipMap` kept alive by `_map`.
+    // Rust guarantees fields are dropped in declaration order, so `iter` MUST
+    // be declared before `_map` to prevent a Use-After-Free on drop.
     iter: SkipMapRangeIter<'static>,
     /// Stores a reference to the skipmap.
-    map: Arc<SkipMap<Bytes, Bytes>>,
+    _map: Arc<SkipMap<Bytes, Bytes>>,
     /// Stores the current key-value pair.
     item: (Bytes, Bytes),
 }
