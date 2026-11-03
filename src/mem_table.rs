@@ -121,7 +121,8 @@ impl MemTable {
     pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
         let map_iter = self.map.range((map_bound(lower), map_bound(upper)));
 
-        // SAFETY: self.map is heap-allocated behind an Arc, and MemTableIterator.
+        // SAFETY:
+        // self.map is heap-allocated behind an Arc, and MemTableIterator.
         // co-owns a clone of "_map" that is dropped strictly after iter.
         let static_iter =
             unsafe { mem::transmute::<SkipMapRangeIter<'_>, SkipMapRangeIter<'static>>(map_iter) };
@@ -163,12 +164,15 @@ type SkipMapRangeIter<'a> =
 ///
 /// This is part of week 1, day 2.
 pub struct MemTableIterator {
-    // SAFETY: `iter` borrows from the heap-allocated `SkipMap` kept alive by `_map`.
-    // Rust guarantees fields are dropped in declaration order, so `iter` MUST
-    // be declared before `_map` to prevent a Use-After-Free on drop.
+    // SAFETY:
+    // `iter` borrows from the heap-allocated `SkipMap` kept alive by `_map`.
+    // Rust guarantees fields are dropped in declaration order, so `iter`
+    // must be declared before `_map` to prevent a Use-After-Free on drop.
     iter: SkipMapRangeIter<'static>,
+
     /// Stores a reference to the skipmap.
     _map: Arc<SkipMap<Bytes, Bytes>>,
+
     /// Stores the current key-value pair.
     item: (Bytes, Bytes),
 }
