@@ -53,7 +53,7 @@ impl Block {
         let data = &data[..data_end];
         Self {
             data: data.to_vec(),
-            offsets: offsets,
+            offsets,
         }
     }
 }
