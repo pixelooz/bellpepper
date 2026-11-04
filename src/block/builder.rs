@@ -15,9 +15,15 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use std::mem;
+
+use bytes::BufMut;
+
 use crate::key::{KeySlice, KeyVec};
 
 use super::Block;
+
+pub(crate) const SIZEOF_U16: usize = mem::size_of::<u16>();
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -34,23 +40,63 @@ pub struct BlockBuilder {
 impl BlockBuilder {
     /// Creates a new block builder.
     pub fn new(block_size: usize) -> Self {
-        unimplemented!()
+        Self {
+            offsets: Vec::new(),
+            data: Vec::new(),
+            block_size,
+            first_key: KeyVec::new(),
+        }
+    }
+
+    /// Returns the size of the current block.
+    pub fn estimated_size(&self) -> usize {
+        self.data.len() + self.offsets.len() * SIZEOF_U16 + SIZEOF_U16
     }
 
     /// Adds a key-value pair to the block. Returns false when the block is full.
     /// You may find the `bytes::BufMut` trait useful for manipulating binary data.
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
-        unimplemented!()
+        assert!(!key.is_empty(), "key cannot be empty");
+
+        let size_estimate = self.estimated_size() + key.len() + value.len() + SIZEOF_U16 * 3;
+        if !self.data.is_empty() && size_estimate > self.block_size {
+            return false;
+        }
+        let Ok(data_offset) = u16::try_from(self.data.len()) else {
+            return false;
+        };
+        let Ok(key_len) = u16::try_from(key.len()) else {
+            return false;
+        };
+        let Ok(value_len) = u16::try_from(value.len()) else {
+            return false;
+        };
+        self.offsets.push(data_offset);
+
+        self.data.put_u16(key_len);
+        self.data.put(key.raw_ref());
+
+        self.data.put_u16(value_len);
+        self.data.put(value);
+
+        if self.first_key.is_empty() {
+            self.first_key = key.to_key_vec();
+        }
+        true
     }
 
     /// Check if there is no key-value pair in the block.
     pub fn is_empty(&self) -> bool {
-        unimplemented!()
+        self.offsets.is_empty()
     }
 
     /// Finalize the block.
     pub fn build(self) -> Block {
-        unimplemented!()
+        assert!(!self.is_empty(), "SsTable cannot contain empty blocks");
+        Block {
+            data: self.data,
+            offsets: self.offsets,
+        }
     }
 }
