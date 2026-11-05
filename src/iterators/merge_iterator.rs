@@ -87,8 +87,9 @@ impl<I: StorageIterator> MergeIterator<I> {
     }
 }
 
-impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIterator
-    for MergeIterator<I>
+impl<I> StorageIterator for MergeIterator<I>
+where
+    I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
 {
     type KeyType<'a> = KeySlice<'a>;
 
@@ -139,5 +140,15 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
             mem::swap(&mut *heap_top, current);
         }
         Ok(())
+    }
+
+    fn num_active_iterators(&self) -> usize {
+        let iter_count: usize = self.iters.iter().map(|x| x.1.num_active_iterators()).sum();
+        let curr_count: usize = self
+            .current
+            .as_ref()
+            .map(|x| x.1.num_active_iterators())
+            .unwrap_or(0);
+        iter_count + curr_count
     }
 }
