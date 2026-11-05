@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
 use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
@@ -39,7 +39,7 @@ use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::{MemTable, map_bound};
 use crate::mvcc::LsmMvccInner;
-use crate::table::{SsTable, SsTableIterator};
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -174,7 +174,12 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        unimplemented!()
+        self.flush_notifier.send(()).ok();
+        let mut flush_thread = self.flush_thread.lock();
+        if let Some(flush_thread) = flush_thread.take() {
+            flush_thread.join().map_err(|err| anyhow!("{:?}", err))?;
+        }
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -260,9 +265,11 @@ impl LsmStorageInner {
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
     /// not exist.
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
-        let path = path.as_ref();
         let state = LsmStorageState::create(&options);
-
+        let path = path.as_ref();
+        if !path.exists() {
+            std::fs::create_dir_all(path)?;
+        }
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
                 CompactionController::Leveled(LeveledCompactionController::new(options.clone()))
@@ -275,7 +282,6 @@ impl LsmStorageInner {
             ),
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
-
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
@@ -288,7 +294,6 @@ impl LsmStorageInner {
             mvcc: None,
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
         };
-
         Ok(storage)
     }
 
@@ -324,6 +329,9 @@ impl LsmStorageInner {
         let mut l0_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
         for table_id in &snapshot.l0_ss_tables {
             let table = snapshot.ss_tables[table_id].clone();
+            if key > table.last_key().raw_ref() || key < table.first_key().raw_ref() {
+                continue;
+            }
             let iter = SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(key))?;
             l0_iters.push(Box::new(iter));
         }
@@ -402,7 +410,38 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk.
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        unimplemented!()
+        let _state_lock = self.state_lock.lock();
+        let flush_memtable = {
+            let guard = self.state.read();
+            if let Some(last_memtable) = guard.imm_memtables.last() {
+                Arc::clone(last_memtable)
+            } else {
+                return Ok(());
+            }
+        };
+        let mut builder = SsTableBuilder::new(self.options.block_size);
+        flush_memtable.flush(&mut builder)?;
+
+        let sst_id = flush_memtable.id();
+        let sst = Arc::new(builder.build(
+            sst_id,
+            Some(self.block_cache.clone()),
+            self.path_of_sst(sst_id),
+        )?);
+        let mut state_guard = self.state.write();
+        let mut snapshot = state_guard.as_ref().clone();
+        let popped = snapshot
+            .imm_memtables
+            .pop()
+            .expect("should've been returned for empty");
+        assert!(
+            sst_id == popped.id(),
+            "last memtable changed while holding state_lock"
+        );
+        snapshot.l0_ss_tables.insert(0, sst_id);
+        snapshot.ss_tables.insert(sst_id, sst);
+        *state_guard = Arc::new(snapshot);
+        Ok(())
     }
 
     pub fn new_txn(&self) -> Result<()> {
@@ -478,5 +517,5 @@ fn range_overlap(
         Bound::Excluded(key) if key >= table_end => return false,
         _ => {}
     }
-    return true;
+    true
 }

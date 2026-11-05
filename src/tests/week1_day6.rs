@@ -35,7 +35,7 @@ fn test_force_flush_empty_imm_memtable() {
 
     let state = storage.state.read();
     assert!(state.imm_memtables.is_empty());
-    assert!(state.l0_sstables.is_empty());
+    assert!(state.l0_ss_tables.is_empty());
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn test_task1_storage_scan() {
 
     {
         let state = storage.state.read();
-        assert_eq!(state.l0_sstables.len(), 2);
+        assert_eq!(state.l0_ss_tables.len(), 2);
         assert_eq!(state.imm_memtables.len(), 2);
     }
 
@@ -119,7 +119,7 @@ fn test_task1_storage_get() {
 
     {
         let state = storage.state.read();
-        assert_eq!(state.l0_sstables.len(), 2);
+        assert_eq!(state.l0_ss_tables.len(), 2);
         assert_eq!(state.imm_memtables.len(), 2);
     }
 
@@ -160,7 +160,7 @@ fn test_task2_auto_flush() {
 
     std::thread::sleep(Duration::from_millis(500));
 
-    assert!(!storage.inner.state.read().l0_sstables.is_empty());
+    assert!(!storage.inner.state.read().l0_ss_tables.is_empty());
 }
 
 #[test]
