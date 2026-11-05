@@ -429,6 +429,14 @@ impl LsmStorageInner {
         let mut table_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
         for table_id in &snapshot.l0_ss_tables {
             let table = snapshot.ss_tables[table_id].clone();
+            if !range_overlap(
+                lower,
+                upper,
+                table.first_key().raw_ref(),
+                table.last_key().raw_ref(),
+            ) {
+                continue;
+            }
             let table_iter = match lower {
                 Bound::Included(key) => {
                     SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(key))?
@@ -452,4 +460,23 @@ impl LsmStorageInner {
         let lsm_iter = LsmIterator::new(merge_iter, map_bound(upper))?;
         Ok(FusedIterator::new(lsm_iter))
     }
+}
+
+fn range_overlap(
+    user_begin: Bound<&[u8]>,
+    user_end: Bound<&[u8]>,
+    table_start: &[u8],
+    table_end: &[u8],
+) -> bool {
+    match user_end {
+        Bound::Included(key) if key < table_start => return false,
+        Bound::Excluded(key) if key <= table_start => return false,
+        _ => {}
+    }
+    match user_begin {
+        Bound::Included(key) if key > table_end => return false,
+        Bound::Excluded(key) if key >= table_end => return false,
+        _ => {}
+    }
+    return true;
 }

@@ -140,9 +140,11 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
         if self.has_errored {
             bail!("the iterator has become invalid");
         }
-        if let Err(e) = self.iter.next() {
+        if self.iter.is_valid()
+            && let err @ Err(_) = self.iter.next()
+        {
             self.has_errored = true;
-            return Err(e);
+            return err;
         }
         Ok(())
     }
