@@ -129,7 +129,7 @@ pub struct SsTable {
     pub(crate) block_meta: Vec<BlockMeta>,
     /// The offset that indicates the start point of meta blocks in `file`.
     pub(crate) block_meta_offset: usize,
-    id: usize,
+    sst_id: usize,
     block_cache: Option<Arc<BlockCache>>,
     first_key: KeyBytes,
     last_key: KeyBytes,
@@ -161,7 +161,7 @@ impl SsTable {
         Ok(Self {
             file,
             block_meta_offset: meta_offset.try_into().expect("still 32bit machine?"),
-            id,
+            sst_id: id,
             block_cache,
             first_key: block_meta.first().unwrap().first_key.clone(),
             last_key: block_meta.last().unwrap().last_key.clone(),
@@ -169,26 +169,6 @@ impl SsTable {
             bloom: Some(bloom),
             max_ts: 0,
         })
-    }
-
-    /// Create a mock SST with only first key + last key metadata
-    pub fn create_meta_only(
-        id: usize,
-        file_size: u64,
-        first_key: KeyBytes,
-        last_key: KeyBytes,
-    ) -> Self {
-        Self {
-            file: FileObject(None, file_size),
-            block_meta: vec![],
-            block_meta_offset: 0,
-            id,
-            block_cache: None,
-            first_key,
-            last_key,
-            bloom: None,
-            max_ts: 0,
-        }
     }
 
     /// Read a block from the disk.
@@ -209,7 +189,7 @@ impl SsTable {
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
         if let Some(block_cache) = &self.block_cache {
             block_cache
-                .try_get_with((self.id, block_idx), || self.read_block(block_idx))
+                .try_get_with((self.sst_id, block_idx), || self.read_block(block_idx))
                 .map_err(|e| anyhow!("{}", e))
         } else {
             self.read_block(block_idx)
@@ -230,6 +210,18 @@ impl SsTable {
         self.block_meta.len()
     }
 
+    pub fn sst_id(&self) -> usize {
+        self.sst_id
+    }
+
+    pub fn table_size(&self) -> u64 {
+        self.file.1
+    }
+
+    pub fn max_ts(&self) -> u64 {
+        self.max_ts
+    }
+
     pub fn first_key(&self) -> &KeyBytes {
         &self.first_key
     }
@@ -238,15 +230,23 @@ impl SsTable {
         &self.last_key
     }
 
-    pub fn table_size(&self) -> u64 {
-        self.file.1
-    }
-
-    pub fn sst_id(&self) -> usize {
-        self.id
-    }
-
-    pub fn max_ts(&self) -> u64 {
-        self.max_ts
+    /// Create a mock SST with only first key + last key metadata
+    pub fn create_meta_only(
+        sst_id: usize,
+        file_size: u64,
+        first_key: KeyBytes,
+        last_key: KeyBytes,
+    ) -> Self {
+        Self {
+            file: FileObject(None, file_size),
+            block_meta: vec![],
+            block_meta_offset: 0,
+            sst_id,
+            block_cache: None,
+            first_key,
+            last_key,
+            bloom: None,
+            max_ts: 0,
+        }
     }
 }
