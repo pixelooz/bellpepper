@@ -125,23 +125,23 @@ impl LsmStorageInner {
             if builder.estimated_size() >= self.options.intended_sst_size {
                 let sst_id = self.next_sst_id();
                 let builder = builder_opt.take().unwrap();
-                let sst = Arc::new(builder.build(
+                let sst = builder.build(
                     sst_id,
                     Some(Arc::clone(&self.block_cache)),
                     self.path_of_sst(sst_id),
-                )?);
-                ss_tables.push(sst);
+                )?;
+                ss_tables.push(Arc::new(sst));
             }
             iter.next()?;
         }
         if let Some(builder) = builder_opt {
             let sst_id = self.next_sst_id();
-            let sst = Arc::new(builder.build(
+            let sst = builder.build(
                 sst_id,
                 Some(Arc::clone(&self.block_cache)),
                 self.path_of_sst(sst_id),
-            )?);
-            ss_tables.push(sst);
+            )?;
+            ss_tables.push(Arc::new(sst));
         }
         Ok(ss_tables)
     }
