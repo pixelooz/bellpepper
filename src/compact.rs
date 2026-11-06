@@ -18,14 +18,17 @@
 mod leveled;
 
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use anyhow::Result;
 pub use leveled::{LeveledCc, LeveledCompactionOptions, LeveledCompactionTask};
 use serde::{Deserialize, Serialize};
 
+use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableBuilder};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CompactionTask {
@@ -98,6 +101,51 @@ impl LsmStorageInner {
         unimplemented!()
     }
 
+    fn generate_sst_from_iter<I>(
+        &self,
+        mut iter: I,
+        compact_to_bottom: bool,
+    ) -> Result<Vec<Arc<SsTable>>>
+    where
+        I: for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
+    {
+        let mut builder_opt: Option<SsTableBuilder> = None;
+        let mut ss_tables = Vec::new();
+        while iter.is_valid() {
+            if compact_to_bottom && iter.value().is_empty() {
+                iter.next()?;
+                continue;
+            }
+            if builder_opt.is_some() {
+                continue;
+            }
+            builder_opt = Some(SsTableBuilder::new(self.options.block_size));
+            let builder = builder_opt.as_mut().unwrap();
+            builder.add(iter.key(), iter.value());
+            if builder.estimated_size() >= self.options.intended_sst_size {
+                let sst_id = self.next_sst_id();
+                let builder = builder_opt.take().unwrap();
+                let sst = Arc::new(builder.build(
+                    sst_id,
+                    Some(Arc::clone(&self.block_cache)),
+                    self.path_of_sst(sst_id),
+                )?);
+                ss_tables.push(sst);
+            }
+            iter.next()?;
+        }
+        if let Some(builder) = builder_opt {
+            let sst_id = self.next_sst_id();
+            let sst = Arc::new(builder.build(
+                sst_id,
+                Some(Arc::clone(&self.block_cache)),
+                self.path_of_sst(sst_id),
+            )?);
+            ss_tables.push(sst);
+        }
+        Ok(ss_tables)
+    }
+
     pub fn force_full_compaction(&self) -> Result<()> {
         unimplemented!()
     }
@@ -109,23 +157,23 @@ impl LsmStorageInner {
     pub(crate) fn spawn_compaction_thread(
         self: &Arc<Self>,
         rx: crossbeam_channel::Receiver<()>,
-    ) -> Result<Option<std::thread::JoinHandle<()>>> {
-        if let CompactionOptions::Leveled(_) = self.options.compaction_options {
-            let this = self.clone();
-            let handle = std::thread::spawn(move || {
-                let ticker = crossbeam_channel::tick(Duration::from_millis(50));
-                loop {
-                    crossbeam_channel::select! {
-                        recv(ticker) -> _ => if let Err(e) = this.trigger_compaction() {
-                            eprintln!("compaction failed: {}", e);
-                        },
-                        recv(rx) -> _ => return
-                    }
-                }
-            });
-            return Ok(Some(handle));
+    ) -> Result<Option<JoinHandle<()>>> {
+        if let CompactionOptions::NoCompaction = self.options.compaction_options {
+            return Ok(None);
         }
-        Ok(None)
+        let this = self.clone();
+        let handle = thread::spawn(move || {
+            let ticker = crossbeam_channel::tick(Duration::from_millis(50));
+            loop {
+                crossbeam_channel::select! {
+                    recv(ticker) -> _ => if let Err(e) = this.trigger_compaction() {
+                        eprintln!("compaction failed: {}", e);
+                    },
+                    recv(rx) -> _ => return
+                }
+            }
+        });
+        Ok(Some(handle))
     }
 
     fn trigger_flush(&self) -> Result<()> {
@@ -142,9 +190,9 @@ impl LsmStorageInner {
     pub(crate) fn spawn_flush_thread(
         self: &Arc<Self>,
         rx: crossbeam_channel::Receiver<()>,
-    ) -> Result<Option<std::thread::JoinHandle<()>>> {
+    ) -> Result<Option<JoinHandle<()>>> {
         let this = self.clone();
-        let handle = std::thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let ticker = crossbeam_channel::tick(Duration::from_millis(50));
             loop {
                 crossbeam_channel::select! {

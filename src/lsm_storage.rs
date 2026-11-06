@@ -87,47 +87,12 @@ pub struct LsmStorageOptions {
     // Block size in bytes
     pub block_size: usize,
     // SST size in bytes, also the approximate memtable capacity limit
-    pub target_sst_size: usize,
+    pub intended_sst_size: usize,
     // Maximum number of memtables in memory, flush to L0 when exceeding this limit
     pub num_memtable_limit: usize,
     pub compaction_options: CompactionOptions,
     pub enable_wal: bool,
     pub serializable: bool,
-}
-
-impl LsmStorageOptions {
-    pub fn default_for_week1_test() -> Self {
-        Self {
-            block_size: 4096,
-            target_sst_size: 2 << 20,
-            compaction_options: CompactionOptions::NoCompaction,
-            enable_wal: false,
-            num_memtable_limit: 50,
-            serializable: false,
-        }
-    }
-
-    pub fn default_for_week1_day6_test() -> Self {
-        Self {
-            block_size: 4096,
-            target_sst_size: 2 << 20,
-            compaction_options: CompactionOptions::NoCompaction,
-            enable_wal: false,
-            num_memtable_limit: 2,
-            serializable: false,
-        }
-    }
-
-    pub fn default_for_week2_test(compaction_options: CompactionOptions) -> Self {
-        Self {
-            block_size: 4096,
-            target_sst_size: 1 << 20, // 1MB
-            compaction_options,
-            enable_wal: false,
-            num_memtable_limit: 2,
-            serializable: false,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -386,10 +351,10 @@ impl LsmStorageInner {
     }
 
     fn try_freeze(&self, estimated_size: usize) -> Result<()> {
-        if estimated_size >= self.options.target_sst_size {
+        if estimated_size >= self.options.intended_sst_size {
             let state_lock_guard = self.state_lock.lock();
             let state_guard = self.state.read();
-            if state_guard.memtable.approximate_size() >= self.options.target_sst_size {
+            if state_guard.memtable.approximate_size() >= self.options.intended_sst_size {
                 drop(state_guard);
                 self.force_freeze_memtable(&state_lock_guard)?;
             }
@@ -519,4 +484,39 @@ fn range_overlap(
         _ => {}
     }
     true
+}
+
+impl LsmStorageOptions {
+    pub fn default_for_week1_test() -> Self {
+        Self {
+            block_size: 4096,
+            intended_sst_size: 2 << 20,
+            compaction_options: CompactionOptions::NoCompaction,
+            enable_wal: false,
+            num_memtable_limit: 50,
+            serializable: false,
+        }
+    }
+
+    pub fn default_for_week1_day6_test() -> Self {
+        Self {
+            block_size: 4096,
+            intended_sst_size: 2 << 20,
+            compaction_options: CompactionOptions::NoCompaction,
+            enable_wal: false,
+            num_memtable_limit: 2,
+            serializable: false,
+        }
+    }
+
+    pub fn default_for_week2_test(compaction_options: CompactionOptions) -> Self {
+        Self {
+            block_size: 4096,
+            intended_sst_size: 1 << 20, // 1MB
+            compaction_options,
+            enable_wal: false,
+            num_memtable_limit: 2,
+            serializable: false,
+        }
+    }
 }

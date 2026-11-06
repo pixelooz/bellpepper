@@ -115,7 +115,7 @@ fn test_task3_storage_integration() {
 fn test_task3_freeze_on_capacity() {
     let dir = tempdir().unwrap();
     let mut options = LsmStorageOptions::default_for_week1_test();
-    options.target_sst_size = 1024;
+    options.intended_sst_size = 1024;
     options.num_memtable_limit = 1000;
     let storage = Arc::new(LsmStorageInner::open(dir.path(), options).unwrap());
     for _ in 0..1000 {
