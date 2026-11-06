@@ -16,19 +16,13 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 mod leveled;
-mod simple_leveled;
-mod tiered;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-pub use leveled::{LeveledCompactionController, LeveledCompactionOptions, LeveledCompactionTask};
+pub use leveled::{LeveledCc, LeveledCompactionOptions, LeveledCompactionTask};
 use serde::{Deserialize, Serialize};
-pub use simple_leveled::{
-    SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, SimpleLeveledCompactionTask,
-};
-pub use tiered::{TieredCompactionController, TieredCompactionOptions, TieredCompactionTask};
 
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
 use crate::table::SsTable;
@@ -36,8 +30,6 @@ use crate::table::SsTable;
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CompactionTask {
     Leveled(LeveledCompactionTask),
-    Tiered(TieredCompactionTask),
-    Simple(SimpleLeveledCompactionTask),
     ForceFullCompaction {
         l0_ss_tables: Vec<usize>,
         l1_ss_tables: Vec<usize>,
@@ -49,32 +41,23 @@ impl CompactionTask {
         match self {
             CompactionTask::ForceFullCompaction { .. } => true,
             CompactionTask::Leveled(task) => task.is_lower_level_bottom_level,
-            CompactionTask::Simple(task) => task.is_lower_level_bottom_level,
-            CompactionTask::Tiered(task) => task.bottom_tier_included,
         }
     }
 }
 
 pub(crate) enum CompactionController {
-    Leveled(LeveledCompactionController),
-    Tiered(TieredCompactionController),
-    Simple(SimpleLeveledCompactionController),
+    Leveled(LeveledCc),
     NoCompaction,
 }
 
 impl CompactionController {
     pub fn generate_compaction_task(&self, snapshot: &LsmStorageState) -> Option<CompactionTask> {
+        use CompactionController as Cc;
         match self {
-            CompactionController::Leveled(ctrl) => ctrl
+            Cc::Leveled(ctrl) => ctrl
                 .generate_compaction_task(snapshot)
                 .map(CompactionTask::Leveled),
-            CompactionController::Simple(ctrl) => ctrl
-                .generate_compaction_task(snapshot)
-                .map(CompactionTask::Simple),
-            CompactionController::Tiered(ctrl) => ctrl
-                .generate_compaction_task(snapshot)
-                .map(CompactionTask::Tiered),
-            CompactionController::NoCompaction => unreachable!(),
+            Cc::NoCompaction => unreachable!(),
         }
     }
 
@@ -85,15 +68,10 @@ impl CompactionController {
         output: &[usize],
         in_recovery: bool,
     ) -> (LsmStorageState, Vec<usize>) {
+        use CompactionController as Cc;
         match (self, task) {
-            (CompactionController::Leveled(ctrl), CompactionTask::Leveled(task)) => {
+            (Cc::Leveled(ctrl), CompactionTask::Leveled(task)) => {
                 ctrl.apply_compaction_result(snapshot, task, output, in_recovery)
-            }
-            (CompactionController::Simple(ctrl), CompactionTask::Simple(task)) => {
-                ctrl.apply_compaction_result(snapshot, task, output)
-            }
-            (CompactionController::Tiered(ctrl), CompactionTask::Tiered(task)) => {
-                ctrl.apply_compaction_result(snapshot, task, output)
             }
             _ => unreachable!(),
         }
@@ -102,10 +80,7 @@ impl CompactionController {
 
 impl CompactionController {
     pub fn flush_to_l0(&self) -> bool {
-        matches!(
-            self,
-            Self::Leveled(_) | Self::Simple(_) | Self::NoCompaction
-        )
+        matches!(self, Self::Leveled(_) | Self::NoCompaction)
     }
 }
 
@@ -114,10 +89,6 @@ pub enum CompactionOptions {
     /// Leveled compaction with partial compaction + dynamic level support (= RocksDB's Leveled
     /// Compaction)
     Leveled(LeveledCompactionOptions),
-    /// Tiered compaction (= RocksDB's universal compaction)
-    Tiered(TieredCompactionOptions),
-    /// Simple leveled compaction
-    Simple(SimpleLeveledCompactionOptions),
     /// In no compaction mode (week 1), always flush to L0
     NoCompaction,
 }
@@ -139,10 +110,7 @@ impl LsmStorageInner {
         self: &Arc<Self>,
         rx: crossbeam_channel::Receiver<()>,
     ) -> Result<Option<std::thread::JoinHandle<()>>> {
-        if let CompactionOptions::Leveled(_)
-        | CompactionOptions::Simple(_)
-        | CompactionOptions::Tiered(_) = self.options.compaction_options
-        {
+        if let CompactionOptions::Leveled(_) = self.options.compaction_options {
             let this = self.clone();
             let handle = std::thread::spawn(move || {
                 let ticker = crossbeam_channel::tick(Duration::from_millis(50));

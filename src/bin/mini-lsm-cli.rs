@@ -20,10 +20,7 @@ use wrapper::mini_lsm_wrapper;
 use anyhow::Result;
 use bytes::Bytes;
 use clap::{Parser, ValueEnum};
-use mini_lsm_wrapper::compact::{
-    CompactionOptions, LeveledCompactionOptions, SimpleLeveledCompactionOptions,
-    TieredCompactionOptions,
-};
+use mini_lsm_wrapper::compact::{CompactionOptions, LeveledCompactionOptions};
 use mini_lsm_wrapper::iterators::StorageIterator;
 use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
 use std::path::PathBuf;
@@ -31,9 +28,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, ValueEnum)]
 enum CompactionStrategy {
-    Simple,
     Leveled,
-    Tiered,
     None,
 }
 
@@ -319,20 +314,6 @@ fn main() -> Result<()> {
             num_memtable_limit: 3,
             compaction_options: match args.compaction {
                 CompactionStrategy::None => CompactionOptions::NoCompaction,
-                CompactionStrategy::Simple => {
-                    CompactionOptions::Simple(SimpleLeveledCompactionOptions {
-                        size_ratio_percent: 200,
-                        level0_file_num_compaction_trigger: 2,
-                        max_levels: 4,
-                    })
-                }
-                CompactionStrategy::Tiered => CompactionOptions::Tiered(TieredCompactionOptions {
-                    num_tiers: 3,
-                    max_size_amplification_percent: 200,
-                    size_ratio: 1,
-                    min_merge_width: 2,
-                    max_merge_width: None,
-                }),
                 CompactionStrategy::Leveled => {
                     CompactionOptions::Leveled(LeveledCompactionOptions {
                         level0_file_num_compaction_trigger: 2,

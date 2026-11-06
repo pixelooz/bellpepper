@@ -28,8 +28,7 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::block::Block;
 use crate::compact::{
-    CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
-    SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
+    CompactionController, CompactionOptions, LeveledCc, LeveledCompactionOptions,
 };
 use crate::iterators::StorageIterator;
 use crate::iterators::merge_iterator::MergeIterator;
@@ -67,12 +66,10 @@ pub enum WriteBatchRecord<T: AsRef<[u8]>> {
 impl LsmStorageState {
     fn create(options: &LsmStorageOptions) -> Self {
         let levels = match &options.compaction_options {
-            CompactionOptions::Leveled(LeveledCompactionOptions { max_levels, .. })
-            | CompactionOptions::Simple(SimpleLeveledCompactionOptions { max_levels, .. }) => (1
+            CompactionOptions::Leveled(LeveledCompactionOptions { max_levels, .. }) => (1
                 ..=*max_levels)
                 .map(|level| (level, Vec::new()))
                 .collect::<Vec<_>>(),
-            CompactionOptions::Tiered(_) => Vec::new(),
             CompactionOptions::NoCompaction => vec![(1, Vec::new())],
         };
         Self {
@@ -272,14 +269,8 @@ impl LsmStorageInner {
         }
         let compaction_controller = match &options.compaction_options {
             CompactionOptions::Leveled(options) => {
-                CompactionController::Leveled(LeveledCompactionController::new(options.clone()))
+                CompactionController::Leveled(LeveledCc::new(options.clone()))
             }
-            CompactionOptions::Tiered(options) => {
-                CompactionController::Tiered(TieredCompactionController::new(options.clone()))
-            }
-            CompactionOptions::Simple(options) => CompactionController::Simple(
-                SimpleLeveledCompactionController::new(options.clone()),
-            ),
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
         let storage = Self {

@@ -34,11 +34,11 @@ pub struct LeveledCompactionOptions {
     pub base_level_size_mb: usize,
 }
 
-pub struct LeveledCompactionController {
+pub struct LeveledCc {
     options: LeveledCompactionOptions,
 }
 
-impl LeveledCompactionController {
+impl LeveledCc {
     pub fn new(options: LeveledCompactionOptions) -> Self {
         Self { options }
     }

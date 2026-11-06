@@ -20,10 +20,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
-use mini_lsm_wrapper::compact::{
-    LeveledCompactionController, LeveledCompactionOptions, SimpleLeveledCompactionController,
-    SimpleLeveledCompactionOptions, TieredCompactionController, TieredCompactionOptions,
-};
+use mini_lsm_wrapper::compact::{LeveledCc, LeveledCompactionOptions};
 use mini_lsm_wrapper::key::KeyBytes;
 use mini_lsm_wrapper::lsm_storage::LsmStorageState;
 use mini_lsm_wrapper::mem_table::MemTable;
@@ -34,52 +31,6 @@ use rand::{Rng, RngExt, SeedableRng};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 enum Args {
-    Simple {
-        /// Dump the generated ID instead of where the original data comes from.
-        /// For example, if SST 1, 2, 3 is compacted to another level, it should have
-        /// a new SST ID 4, 5, 6 as SSTs are immutable and write-once. With this flag
-        /// enabled, you will see the new level has SST 1, 2, 3 because the data of
-        /// 4, 5, 6 are originated from 1, 2, 3.
-        #[clap(long)]
-        dump_real_id: bool,
-        /// Only dump size information instead of the layer files. if this is enabled,
-        /// it will print one row per compaction iteration.
-        #[clap(long)]
-        size_only: bool,
-        #[clap(long, default_value = "2")]
-        level0_file_num_compaction_trigger: usize,
-        #[clap(long, default_value = "3")]
-        max_levels: usize,
-        #[clap(long, default_value = "200")]
-        size_ratio_percent: usize,
-        #[clap(long, default_value = "50")]
-        iterations: usize,
-    },
-    Tiered {
-        /// Dump the generated ID instead of where the original data comes from.
-        /// For example, if SST 1, 2, 3 is compacted to another level, it should have
-        /// a new SST ID 4, 5, 6 as SSTs are immutable and write-once. With this flag
-        /// enabled, you will see the new level has SST 1, 2, 3 because the data of
-        /// 4, 5, 6 are originated from 1, 2, 3.
-        #[clap(long)]
-        dump_real_id: bool,
-        /// Only dump size information instead of the layer files. if this is enabled,
-        /// it will print one row per compaction iteration.
-        #[clap(long)]
-        size_only: bool,
-        #[clap(long, default_value = "8")]
-        num_tiers: usize,
-        #[clap(long, default_value = "200")]
-        max_size_amplification_percent: usize,
-        #[clap(long, default_value = "1")]
-        size_ratio: usize,
-        #[clap(long, default_value = "2")]
-        min_merge_width: usize,
-        #[clap(long)]
-        max_merge_width: Option<usize>,
-        #[clap(long, default_value = "50")]
-        iterations: usize,
-    },
     Leveled {
         /// Dump the generated ID instead of where the original data comes from.
         /// For example, if SST 1, 2, 3 is compacted to another level, it should have
@@ -284,216 +235,6 @@ fn generate_random_split(
 fn main() {
     let args = Args::parse();
     match args {
-        Args::Simple {
-            dump_real_id,
-            size_only,
-            size_ratio_percent,
-            iterations,
-            level0_file_num_compaction_trigger,
-            max_levels,
-        } => {
-            // TODO(chi): use unified logic for all 3 compactions...
-            let controller =
-                SimpleLeveledCompactionController::new(SimpleLeveledCompactionOptions {
-                    size_ratio_percent,
-                    level0_file_num_compaction_trigger,
-                    max_levels,
-                });
-            let mut storage = MockStorage::new();
-            for i in 0..max_levels {
-                storage.snapshot.levels.push((i + 1, Vec::new()));
-            }
-            let mut max_space = 0;
-            for i in 0..iterations {
-                println!("=== Iteration {i} ===");
-                storage.flush_sst_to_l0();
-                println!("--- After Flush ---");
-                if size_only {
-                    storage.dump_size_only();
-                } else if dump_real_id {
-                    storage.dump_real_id(true, false);
-                } else {
-                    storage.dump_original_id(true, false);
-                }
-                let mut num_compactions = 0;
-                while let Some(task) = {
-                    if !size_only {
-                        println!("--- Compaction Task ---");
-                    }
-                    controller.generate_compaction_task(&storage.snapshot)
-                } {
-                    let mut sst_ids = Vec::new();
-                    for file in task
-                        .upper_level_sst_ids
-                        .iter()
-                        .chain(task.lower_level_sst_ids.iter())
-                    {
-                        let new_sst_id = storage.generate_sst_id();
-                        sst_ids.push(new_sst_id);
-                        storage.file_list.insert(new_sst_id, *file);
-                        storage.total_writes += 1;
-                    }
-                    print!(
-                        "Upper L{} {:?} ",
-                        task.upper_level.unwrap_or_default(),
-                        task.upper_level_sst_ids
-                    );
-                    print!(
-                        "Lower L{} {:?} ",
-                        task.lower_level, task.lower_level_sst_ids
-                    );
-                    println!("-> {:?}", sst_ids);
-                    max_space = max_space.max(storage.file_list.len());
-                    let (snapshot, del) =
-                        controller.apply_compaction_result(&storage.snapshot, &task, &sst_ids);
-                    storage.snapshot = snapshot;
-                    storage.remove(&del);
-                    println!("--- After Compaction ---");
-                    if size_only {
-                        storage.dump_size_only();
-                    } else if dump_real_id {
-                        storage.dump_real_id(true, false);
-                    } else {
-                        storage.dump_original_id(true, false);
-                    }
-                    num_compactions += 1;
-                    if num_compactions >= max_levels * 2 {
-                        panic!("compaction does not converge?");
-                    }
-                }
-                if num_compactions == 0 {
-                    println!("no compaction triggered");
-                } else {
-                    println!("{num_compactions} compaction triggered in this iteration");
-                }
-                max_space = max_space.max(storage.file_list.len());
-                println!("--- Statistics ---");
-                println!(
-                    "Write Amplification: {}/{}={:.3}x",
-                    storage.total_writes,
-                    storage.total_flushes,
-                    storage.total_writes as f64 / storage.total_flushes as f64
-                );
-                println!(
-                    "Maximum Space Usage: {}/{}={:.3}x",
-                    max_space,
-                    storage.total_flushes,
-                    max_space as f64 / storage.total_flushes as f64
-                );
-                println!(
-                    "Read Amplification: {}x",
-                    storage.snapshot.l0_ss_tables.len()
-                        + storage
-                            .snapshot
-                            .levels
-                            .iter()
-                            .filter(|(_, f)| !f.is_empty())
-                            .count()
-                );
-                println!();
-            }
-        }
-        Args::Tiered {
-            dump_real_id,
-            size_only,
-            num_tiers: level0_file_num_compaction_trigger,
-            max_size_amplification_percent,
-            size_ratio,
-            min_merge_width,
-            max_merge_width,
-            iterations,
-        } => {
-            let controller = TieredCompactionController::new(TieredCompactionOptions {
-                num_tiers: level0_file_num_compaction_trigger,
-                max_size_amplification_percent,
-                size_ratio,
-                min_merge_width,
-                max_merge_width,
-            });
-            let mut storage = MockStorage::new();
-            let mut max_space = 0;
-            for i in 0..iterations {
-                println!("=== Iteration {i} ===");
-                storage.flush_sst_to_new_tier();
-                println!("--- After Flush ---");
-                if size_only {
-                    storage.dump_size_only();
-                } else if dump_real_id {
-                    storage.dump_real_id(false, false);
-                } else {
-                    storage.dump_original_id(false, false);
-                }
-                if !size_only {
-                    println!("--- Compaction Task ---");
-                }
-                let mut num_compactions = 0;
-                while let Some(task) = {
-                    if !size_only {
-                        println!("--- Compaction Task ---");
-                    }
-                    controller.generate_compaction_task(&storage.snapshot)
-                } {
-                    let mut sst_ids = Vec::new();
-                    for (tier_id, files) in &task.tiers {
-                        for file in files {
-                            let new_sst_id = storage.generate_sst_id();
-                            sst_ids.push(new_sst_id);
-                            storage.file_list.insert(new_sst_id, *file);
-                            storage.total_writes += 1;
-                        }
-                        print!("L{} {:?} ", tier_id, files);
-                    }
-                    println!("-> {:?}", sst_ids);
-                    max_space = max_space.max(storage.file_list.len());
-                    let (snapshot, del) =
-                        controller.apply_compaction_result(&storage.snapshot, &task, &sst_ids);
-                    storage.snapshot = snapshot;
-                    storage.remove(&del);
-                    println!("--- After Compaction ---");
-                    if size_only {
-                        storage.dump_size_only();
-                    } else if dump_real_id {
-                        storage.dump_real_id(false, false);
-                    } else {
-                        storage.dump_original_id(false, false);
-                    }
-                    num_compactions += 1;
-                    if num_compactions >= level0_file_num_compaction_trigger * 3 {
-                        panic!("compaction does not converge?");
-                    }
-                }
-                if num_compactions == 0 {
-                    println!("no compaction triggered");
-                } else {
-                    println!("{num_compactions} compaction triggered in this iteration");
-                }
-                max_space = max_space.max(storage.file_list.len());
-                println!("--- Statistics ---");
-                println!(
-                    "Write Amplification: {}/{}={:.3}x",
-                    storage.total_writes,
-                    storage.total_flushes,
-                    storage.total_writes as f64 / storage.total_flushes as f64
-                );
-                println!(
-                    "Maximum Space Usage: {}/{}={:.3}x",
-                    max_space,
-                    storage.total_flushes,
-                    max_space as f64 / storage.total_flushes as f64
-                );
-                println!(
-                    "Read Amplification: {}x",
-                    storage.snapshot.l0_ss_tables.len()
-                        + storage
-                            .snapshot
-                            .levels
-                            .iter()
-                            .filter(|(_, f)| !f.is_empty())
-                            .count()
-                );
-                println!();
-            }
-        }
         Args::Leveled {
             dump_real_id,
             size_only,
@@ -505,7 +246,7 @@ fn main() {
             sst_size_mb,
             seed,
         } => {
-            let controller = LeveledCompactionController::new(LeveledCompactionOptions {
+            let controller = LeveledCc::new(LeveledCompactionOptions {
                 level0_file_num_compaction_trigger,
                 level_size_multiplier,
                 max_levels,
