@@ -23,6 +23,7 @@ use bytes::BufMut;
 
 use super::{BlockMeta, SsTable};
 use crate::table::FileObject;
+use crate::table::bloom::Bloom;
 use crate::{
     block::BlockBuilder,
     key::{KeySlice, KeyVec},
@@ -39,6 +40,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    key_hashes: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -51,6 +53,7 @@ impl SsTableBuilder {
             data: Vec::new(),
             meta: Vec::new(),
             block_size,
+            key_hashes: Vec::new(),
         }
     }
 
@@ -62,6 +65,8 @@ impl SsTableBuilder {
         if self.first_key.is_empty() {
             self.first_key.set_from_slice(key);
         }
+        let hash = farmhash::fingerprint32(key.raw_ref());
+        self.key_hashes.push(hash);
         if self.builder.add(key, value) {
             self.last_key.set_from_slice(key);
             return;
@@ -99,10 +104,19 @@ impl SsTableBuilder {
         path: impl AsRef<Path>,
     ) -> Result<SsTable> {
         self.finish_block();
+
         let mut buffer = self.data;
         let meta_offset = buffer.len();
+
         BlockMeta::encode_block_meta(&self.meta, &mut buffer);
         buffer.put_u32(meta_offset.try_into().unwrap());
+
+        let bits_per_key = Bloom::bloom_bits_per_key(self.key_hashes.len(), 0.01);
+        let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
+        let bloom_offset = buffer.len();
+        bloom.encode(&mut buffer);
+        buffer.put_u32(bloom_offset.try_into().unwrap());
+
         let file = FileObject::create_write(path.as_ref(), buffer)?;
         Ok(SsTable {
             file,
@@ -111,7 +125,7 @@ impl SsTableBuilder {
             block_cache,
             first_key: self.meta.first().unwrap().first_key.clone(),
             last_key: self.meta.last().unwrap().last_key.clone(),
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
             block_meta: self.meta,
         })

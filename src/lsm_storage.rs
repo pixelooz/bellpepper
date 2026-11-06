@@ -326,10 +326,20 @@ impl LsmStorageInner {
                 return Ok(Some(value));
             }
         }
+        let keep_table = |key: &[u8], table: &SsTable| {
+            if table.first_key().raw_ref() <= key && key <= table.last_key().raw_ref() {
+                if let Some(bloom) = &table.bloom {
+                    return bloom.may_contain(farmhash::fingerprint32(key));
+                }
+                true
+            } else {
+                false
+            }
+        };
         let mut l0_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
         for table_id in &snapshot.l0_ss_tables {
             let table = snapshot.ss_tables[table_id].clone();
-            if key > table.last_key().raw_ref() || key < table.first_key().raw_ref() {
+            if !keep_table(key, &table) {
                 continue;
             }
             let iter = SsTableIterator::create_and_seek_to_key(table, KeySlice::from_slice(key))?;
