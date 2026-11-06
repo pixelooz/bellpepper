@@ -17,6 +17,7 @@
 
 mod leveled;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -26,9 +27,11 @@ pub use leveled::{LeveledCc, LeveledCompactionOptions, LeveledCompactionTask};
 use serde::{Deserialize, Serialize};
 
 use crate::iterators::StorageIterator;
+use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
-use crate::table::{SsTable, SsTableBuilder};
+use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CompactionTask {
@@ -97,8 +100,34 @@ pub enum CompactionOptions {
 }
 
 impl LsmStorageInner {
-    fn compact(&self, _task: &CompactionTask) -> Result<Vec<Arc<SsTable>>> {
-        unimplemented!()
+    fn compact(&self, comp_task: &CompactionTask) -> Result<Vec<Arc<SsTable>>> {
+        match comp_task {
+            CompactionTask::ForceFullCompaction {
+                l0_ss_tables,
+                l1_ss_tables,
+            } => {
+                let snapshot = {
+                    let state = self.state.read();
+                    Arc::clone(&state)
+                };
+                let mut l0_iters = Vec::with_capacity(l0_ss_tables.len());
+                for sst_id in l0_ss_tables {
+                    let sst = snapshot.ss_tables.get(sst_id).cloned().unwrap();
+                    l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                }
+                let mut l1_iters = Vec::with_capacity(l1_ss_tables.len());
+                for sst_id in l1_ss_tables {
+                    let sst = snapshot.ss_tables.get(sst_id).cloned().unwrap();
+                    l1_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                }
+                let iter = TwoMergeIterator::create(
+                    MergeIterator::create(l0_iters),
+                    MergeIterator::create(l1_iters),
+                )?;
+                self.generate_sst_from_iter(iter, true)
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn generate_sst_from_iter<I>(
@@ -147,7 +176,55 @@ impl LsmStorageInner {
     }
 
     pub fn force_full_compaction(&self) -> Result<()> {
-        unimplemented!()
+        let CompactionOptions::NoCompaction = self.options.compaction_options else {
+            panic!(
+                "compaction mode other than `NoCompaction`: {:?}",
+                self.options.compaction_options
+            )
+        };
+        let snapshot = {
+            let state = self.state.read();
+            Arc::clone(&state)
+        };
+        let l0_ss_tables = &snapshot.l0_ss_tables;
+        let l1_ss_tables = &snapshot.levels[0].1;
+
+        let task = CompactionTask::ForceFullCompaction {
+            l0_ss_tables: l0_ss_tables.clone(),
+            l1_ss_tables: l1_ss_tables.clone(),
+        };
+        let new_ssts = self.compact(&task)?;
+
+        let _state_guard = self.state_lock.lock();
+        let mut snapshot = self.state.read().as_ref().clone();
+
+        for sst_id in l0_ss_tables.iter().chain(l1_ss_tables.iter()) {
+            let removed = snapshot.ss_tables.remove(sst_id);
+            assert!(removed.is_some())
+        }
+        let mut new_ids = Vec::with_capacity(new_ssts.len());
+        for new_sst in new_ssts {
+            let sst_id = new_sst.sst_id();
+            new_ids.push(sst_id);
+            let prev = snapshot.ss_tables.insert(sst_id, new_sst);
+            assert!(prev.is_none(), "duplicate sst_id");
+        }
+        assert_eq!(l1_ss_tables, &snapshot.levels[0].1,);
+        snapshot.levels[0].1.clone_from(&new_ids);
+
+        let mut l0_sst_set = snapshot
+            .l0_ss_tables
+            .iter()
+            .copied()
+            .collect::<HashSet<usize>>();
+        snapshot.l0_ss_tables.retain(|id| !l0_sst_set.remove(id));
+        assert!(l0_sst_set.is_empty());
+        *self.state.write() = Arc::new(snapshot);
+
+        for sst_id in l0_ss_tables.iter().chain(l1_ss_tables) {
+            std::fs::remove_file(self.path_of_sst(*sst_id))?;
+        }
+        Ok(())
     }
 
     fn trigger_compaction(&self) -> Result<()> {
