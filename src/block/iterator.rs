@@ -40,14 +40,23 @@ pub struct BlockIterator {
     first_key: KeyVec,
 }
 
+impl Block {
+    fn get_first_key(&self) -> KeyVec {
+        let mut buffer = &self.data[..];
+        buffer.get_u16();
+        let key_len = buffer.get_u16();
+        KeyVec::from_vec(buffer[..key_len.into()].to_vec())
+    }
+}
+
 impl BlockIterator {
     fn new(block: Arc<Block>) -> Self {
         Self {
+            first_key: block.get_first_key(),
             block,
             key: KeyVec::new(),
             value_range: (0, 0),
             idx: 0,
-            first_key: KeyVec::new(),
         }
     }
 
@@ -78,12 +87,15 @@ impl BlockIterator {
 
     fn seek_to_offset(&mut self, offset: usize) {
         let mut entry = &self.block.data[offset..];
-        let key_len = usize::from(entry.get_u16());
+        let overlap_len = usize::from(entry.get_u16());
+        let rest_len = usize::from(entry.get_u16());
+        let rest_key = &entry[..rest_len];
         self.key.clear();
-        self.key.append(&entry[..key_len]);
-        entry.advance(key_len);
+        self.key.append(&self.first_key.raw_ref()[..overlap_len]);
+        self.key.append(rest_key);
+        entry.advance(rest_len);
         let value_len = usize::from(entry.get_u16());
-        let value_offset_begin = offset + SIZEOF_U16 + key_len + SIZEOF_U16;
+        let value_offset_begin = offset + SIZEOF_U16 * 2 + rest_len + SIZEOF_U16;
         let value_offset_end = value_offset_begin + value_len;
         self.value_range = (value_offset_begin, value_offset_end);
     }

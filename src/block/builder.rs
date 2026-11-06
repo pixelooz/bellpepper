@@ -15,7 +15,7 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
-use std::mem;
+use std::{cmp::Ordering, mem};
 
 use bytes::BufMut;
 
@@ -48,6 +48,15 @@ impl BlockBuilder {
         }
     }
 
+    fn compute_overlap(first_key: KeySlice, curr_key: KeySlice) -> usize {
+        first_key
+            .raw_ref()
+            .iter()
+            .zip(curr_key.raw_ref())
+            .take_while(|(a, b)| a == b)
+            .count()
+    }
+
     /// Returns the size of the current block.
     pub fn estimated_size(&self) -> usize {
         self.data.len() + self.offsets.len() * SIZEOF_U16 + SIZEOF_U16
@@ -66,7 +75,7 @@ impl BlockBuilder {
         let Ok(data_offset) = u16::try_from(self.data.len()) else {
             return false;
         };
-        let Ok(key_len) = u16::try_from(key.len()) else {
+        let Ordering::Less = key.len().cmp(&u16::MAX.into()) else {
             return false;
         };
         let Ok(value_len) = u16::try_from(value.len()) else {
@@ -74,8 +83,12 @@ impl BlockBuilder {
         };
         self.offsets.push(data_offset);
 
-        self.data.put_u16(key_len);
-        self.data.put(key.raw_ref());
+        let overlap_len = Self::compute_overlap(self.first_key.as_key_slice(), key);
+
+        self.data.put_u16(overlap_len.try_into().unwrap());
+        self.data
+            .put_u16((key.len() - overlap_len).try_into().unwrap());
+        self.data.put(&key.raw_ref()[overlap_len..]);
 
         self.data.put_u16(value_len);
         self.data.put(value);
