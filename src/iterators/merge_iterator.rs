@@ -109,11 +109,7 @@ where
     }
 
     fn next(&mut self) -> Result<()> {
-        let current = self
-            .current
-            .as_mut()
-            .expect("is_valid should've caught None");
-
+        let current = self.current.as_mut().unwrap();
         while let Some(mut heap_top) = self.iters.peek_mut() {
             if heap_top.1.key() == current.1.key() {
                 if let Err(e) = heap_top.1.next() {

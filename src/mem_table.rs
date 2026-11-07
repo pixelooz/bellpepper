@@ -117,13 +117,11 @@ impl MemTable {
     /// Get an iterator over a range of keys.
     pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> MemTableIterator {
         let map_iter = self.map.range((map_bound(lower), map_bound(upper)));
-
         // SAFETY:
         // self.map is heap-allocated behind an Arc, and MemTableIterator.
         // co-owns a clone of "_map" that is dropped strictly after iter.
         let static_iter =
             unsafe { mem::transmute::<SkipMapRangeIter<'_>, SkipMapRangeIter<'static>>(map_iter) };
-
         let mut iter = MemTableIterator {
             iter: static_iter,
             _map: Arc::clone(&self.map),

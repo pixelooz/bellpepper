@@ -188,16 +188,13 @@ impl LsmStorageInner {
         };
         let l0_ss_tables = &snapshot.l0_ss_tables;
         let l1_ss_tables = &snapshot.levels[0].1;
-
         let task = CompactionTask::ForceFullCompaction {
             l0_ss_tables: l0_ss_tables.clone(),
             l1_ss_tables: l1_ss_tables.clone(),
         };
         let new_ssts = self.compact(&task)?;
-
         let _state_guard = self.state_lock.lock();
         let mut snapshot = self.state.read().as_ref().clone();
-
         for sst_id in l0_ss_tables.iter().chain(l1_ss_tables.iter()) {
             let removed = snapshot.ss_tables.remove(sst_id);
             assert!(removed.is_some())
@@ -211,7 +208,6 @@ impl LsmStorageInner {
         }
         assert_eq!(l1_ss_tables, &snapshot.levels[0].1,);
         snapshot.levels[0].1.clone_from(&new_ids);
-
         let mut l0_sst_set = snapshot
             .l0_ss_tables
             .iter()
@@ -220,7 +216,6 @@ impl LsmStorageInner {
         snapshot.l0_ss_tables.retain(|id| !l0_sst_set.remove(id));
         assert!(l0_sst_set.is_empty());
         *self.state.write() = Arc::new(snapshot);
-
         for sst_id in l0_ss_tables.iter().chain(l1_ss_tables) {
             std::fs::remove_file(self.path_of_sst(*sst_id))?;
         }

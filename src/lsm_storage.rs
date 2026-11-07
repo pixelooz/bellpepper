@@ -387,7 +387,6 @@ impl LsmStorageInner {
         };
         let mut builder = SsTableBuilder::new(self.options.block_size);
         flush_memtable.flush(&mut builder)?;
-
         let sst_id = flush_memtable.id();
         let sst = Arc::new(builder.build(
             sst_id,
@@ -427,7 +426,6 @@ impl LsmStorageInner {
         };
         let mut memtable_iters = Vec::with_capacity(snapshot.imm_memtables.len() + 1);
         memtable_iters.push(Box::new(snapshot.memtable.scan(lower, upper)));
-
         for iter in &snapshot.imm_memtables {
             memtable_iters.push(Box::new(iter.scan(lower, upper)));
         }

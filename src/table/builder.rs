@@ -104,10 +104,8 @@ impl SsTableBuilder {
         path: impl AsRef<Path>,
     ) -> Result<SsTable> {
         self.finish_block();
-
         let mut buffer = self.data;
         let meta_offset = buffer.len();
-
         BlockMeta::encode_block_meta(&self.meta, &mut buffer);
         buffer.put_u32(meta_offset.try_into().unwrap());
 
