@@ -27,6 +27,7 @@ pub use leveled::{LeveledCc, LeveledCompactionOptions, LeveledCompactionTask};
 use serde::{Deserialize, Serialize};
 
 use crate::iterators::StorageIterator;
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
@@ -118,11 +119,11 @@ impl LsmStorageInner {
                 let mut l1_iters = Vec::with_capacity(l1_ss_tables.len());
                 for sst_id in l1_ss_tables {
                     let sst = snapshot.ss_tables.get(sst_id).cloned().unwrap();
-                    l1_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                    l1_iters.push(Arc::clone(&sst));
                 }
                 let iter = TwoMergeIterator::create(
                     MergeIterator::create(l0_iters),
-                    MergeIterator::create(l1_iters),
+                    SstConcatIterator::create_and_seek_to_first(l1_iters)?,
                 )?;
                 self.generate_sst_from_iter(iter, true)
             }
@@ -145,10 +146,9 @@ impl LsmStorageInner {
                 iter.next()?;
                 continue;
             }
-            if builder_opt.is_some() {
-                continue;
+            if builder_opt.is_none() {
+                builder_opt = Some(SsTableBuilder::new(self.options.block_size));
             }
-            builder_opt = Some(SsTableBuilder::new(self.options.block_size));
             let builder = builder_opt.as_mut().unwrap();
             builder.add(iter.key(), iter.value());
             if builder.estimated_size() >= self.options.intended_sst_size {
@@ -216,6 +216,7 @@ impl LsmStorageInner {
         snapshot.l0_ss_tables.retain(|id| !l0_sst_set.remove(id));
         assert!(l0_sst_set.is_empty());
         *self.state.write() = Arc::new(snapshot);
+        drop(_state_guard);
         for sst_id in l0_ss_tables.iter().chain(l1_ss_tables) {
             std::fs::remove_file(self.path_of_sst(*sst_id))?;
         }

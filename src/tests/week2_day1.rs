@@ -36,11 +36,11 @@ fn test_task1_full_compaction_all_tombstones() {
     storage.delete(b"key").unwrap();
     sync(&storage);
 
-    assert_eq!(storage.state.read().l0_sstables.len(), 1);
+    assert_eq!(storage.state.read().l0_ss_tables.len(), 1);
     storage.force_full_compaction().unwrap();
 
     let state = storage.state.read();
-    assert!(state.l0_sstables.is_empty());
+    assert!(state.l0_ss_tables.is_empty());
     assert!(state.levels[0].1.is_empty());
 }
 
@@ -61,7 +61,7 @@ fn test_task1_full_compaction() {
     storage.delete(b"0").unwrap();
     storage.delete(b"2").unwrap();
     sync(&storage);
-    assert_eq!(storage.state.read().l0_sstables.len(), 3);
+    assert_eq!(storage.state.read().l0_ss_tables.len(), 3);
     let mut iter = construct_merge_iterator_over_storage(&storage.state.read());
     if TS_ENABLED {
         check_iter_result_by_key(
@@ -86,7 +86,7 @@ fn test_task1_full_compaction() {
         );
     }
     storage.force_full_compaction().unwrap();
-    assert!(storage.state.read().l0_sstables.is_empty());
+    assert!(storage.state.read().l0_ss_tables.is_empty());
     let mut iter = construct_merge_iterator_over_storage(&storage.state.read());
     if TS_ENABLED {
         check_iter_result_by_key(
@@ -138,7 +138,7 @@ fn test_task1_full_compaction() {
         );
     }
     storage.force_full_compaction().unwrap();
-    assert!(storage.state.read().l0_sstables.is_empty());
+    assert!(storage.state.read().l0_ss_tables.is_empty());
     let mut iter = construct_merge_iterator_over_storage(&storage.state.read());
     if TS_ENABLED {
         check_iter_result_by_key(
@@ -234,7 +234,7 @@ fn test_task3_integration() {
     sync(&storage);
 
     storage.force_full_compaction().unwrap();
-    assert!(storage.state.read().l0_sstables.is_empty());
+    assert!(storage.state.read().l0_ss_tables.is_empty());
     assert!(!storage.state.read().levels[0].1.is_empty());
 
     storage.put(b"1", b"233").unwrap();
@@ -247,7 +247,7 @@ fn test_task3_integration() {
     sync(&storage);
     storage.force_full_compaction().unwrap();
 
-    assert!(storage.state.read().l0_sstables.is_empty());
+    assert!(storage.state.read().l0_ss_tables.is_empty());
     assert!(!storage.state.read().levels[0].1.is_empty());
 
     check_lsm_iter_result_by_key(
