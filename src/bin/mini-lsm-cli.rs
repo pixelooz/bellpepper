@@ -20,7 +20,7 @@ use wrapper::mini_lsm_wrapper;
 use anyhow::Result;
 use bytes::Bytes;
 use clap::{Parser, ValueEnum};
-use mini_lsm_wrapper::compact::{CompactionOptions, LeveledCompactionOptions};
+use mini_lsm_wrapper::compact::{CompactionOptions, LeveledCompOpt};
 use mini_lsm_wrapper::iterators::StorageIterator;
 use mini_lsm_wrapper::lsm_storage::{LsmStorageOptions, MiniLsm};
 use std::path::PathBuf;
@@ -314,14 +314,12 @@ fn main() -> Result<()> {
             num_memtable_limit: 3,
             compaction_options: match args.compaction {
                 CompactionStrategy::None => CompactionOptions::NoCompaction,
-                CompactionStrategy::Leveled => {
-                    CompactionOptions::Leveled(LeveledCompactionOptions {
-                        level0_file_num_compaction_trigger: 2,
-                        max_levels: 4,
-                        base_level_size_mb: 128,
-                        level_size_multiplier: 2,
-                    })
-                }
+                CompactionStrategy::Leveled => CompactionOptions::Leveled(LeveledCompOpt {
+                    level0_file_num_compaction_trigger: 2,
+                    max_levels: 4,
+                    base_level_size_mb: 128,
+                    level_size_multiplier: 2,
+                }),
             },
             enable_wal: args.enable_wal,
             serializable: args.serializable,

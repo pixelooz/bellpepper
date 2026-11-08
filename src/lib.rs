@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![warn(clippy::collection_is_never_read)]
+
 pub mod block;
 pub mod compact;
 pub mod debug;

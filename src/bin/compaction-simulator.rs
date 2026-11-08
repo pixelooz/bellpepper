@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
-use mini_lsm_wrapper::compact::{LeveledCc, LeveledCompactionOptions};
+use mini_lsm_wrapper::compact::{LeveledCc, LeveledCompOpt};
 use mini_lsm_wrapper::key::KeyBytes;
 use mini_lsm_wrapper::lsm_storage::LsmStorageState;
 use mini_lsm_wrapper::mem_table::MemTable;
@@ -246,7 +246,7 @@ fn main() {
             sst_size_mb,
             seed,
         } => {
-            let controller = LeveledCc::new(LeveledCompactionOptions {
+            let controller = LeveledCc::new(LeveledCompOpt {
                 level0_file_num_compaction_trigger,
                 level_size_multiplier,
                 max_levels,

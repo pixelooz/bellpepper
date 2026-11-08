@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+#![allow(unused_variables)]
+#![allow(dead_code)]
 
 mod leveled;
 
@@ -23,7 +23,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use anyhow::Result;
-pub use leveled::{LeveledCc, LeveledCompactionOptions, LeveledCompactionTask};
+pub use leveled::{LeveledCc, LeveledCompOpt, LeveledCompactionTask};
 use serde::{Deserialize, Serialize};
 
 use crate::iterators::StorageIterator;
@@ -83,9 +83,7 @@ impl CompactionController {
             _ => unreachable!(),
         }
     }
-}
 
-impl CompactionController {
     pub fn flush_to_l0(&self) -> bool {
         matches!(self, Self::Leveled(_) | Self::NoCompaction)
     }
@@ -95,14 +93,14 @@ impl CompactionController {
 pub enum CompactionOptions {
     /// Leveled compaction with partial compaction + dynamic level support (= RocksDB's Leveled
     /// Compaction)
-    Leveled(LeveledCompactionOptions),
+    Leveled(LeveledCompOpt),
     /// In no compaction mode (week 1), always flush to L0
     NoCompaction,
 }
 
 impl LsmStorageInner {
-    fn compact(&self, comp_task: &CompactionTask) -> Result<Vec<Arc<SsTable>>> {
-        match comp_task {
+    fn compact(&self, task: &CompactionTask) -> Result<Vec<Arc<SsTable>>> {
+        match task {
             CompactionTask::ForceFullCompaction {
                 l0_ss_tables,
                 l1_ss_tables,
@@ -113,12 +111,13 @@ impl LsmStorageInner {
                 };
                 let mut l0_iters = Vec::with_capacity(l0_ss_tables.len());
                 for sst_id in l0_ss_tables {
-                    let sst = snapshot.ss_tables.get(sst_id).cloned().unwrap();
-                    l0_iters.push(Box::new(SsTableIterator::create_and_seek_to_first(sst)?));
+                    let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
+                    let iter = SsTableIterator::create_and_seek_to_first(sst)?;
+                    l0_iters.push(Box::new(iter));
                 }
                 let mut l1_iters = Vec::with_capacity(l1_ss_tables.len());
                 for sst_id in l1_ss_tables {
-                    let sst = snapshot.ss_tables.get(sst_id).cloned().unwrap();
+                    let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
                     l1_iters.push(Arc::clone(&sst));
                 }
                 let iter = TwoMergeIterator::create(
@@ -127,7 +126,44 @@ impl LsmStorageInner {
                 )?;
                 self.generate_sst_from_iter(iter, true)
             }
-            _ => unreachable!(),
+            CompactionTask::Leveled(LeveledCompactionTask {
+                upper_level,
+                upper_level_sst_ids,
+                lower_level,
+                lower_level_sst_ids,
+                is_lower_level_bottom_level,
+            }) => {
+                let snapshot = {
+                    let state = self.state.read();
+                    Arc::clone(&state)
+                };
+                let mut lower_ssts = Vec::with_capacity(lower_level_sst_ids.len());
+                for sst_id in lower_level_sst_ids {
+                    let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
+                    lower_ssts.push(sst);
+                }
+                let lower_iter = SstConcatIterator::create_and_seek_to_first(lower_ssts)?;
+                if upper_level.is_some() {
+                    let mut upper_ssts = Vec::with_capacity(upper_level_sst_ids.len());
+                    for sst_id in upper_level_sst_ids {
+                        let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
+                        upper_ssts.push(sst);
+                    }
+                    let upper_iter = SstConcatIterator::create_and_seek_to_first(upper_ssts)?;
+                    let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                    self.generate_sst_from_iter(iter, *is_lower_level_bottom_level)
+                } else {
+                    let mut upper_ssts = Vec::with_capacity(snapshot.l0_ss_tables.len());
+                    for sst_id in &snapshot.l0_ss_tables {
+                        let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
+                        let iter = SsTableIterator::create_and_seek_to_first(sst)?;
+                        upper_ssts.push(Box::new(iter));
+                    }
+                    let upper_iter = MergeIterator::create(upper_ssts);
+                    let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                    self.generate_sst_from_iter(iter, *is_lower_level_bottom_level)
+                }
+            }
         }
     }
 

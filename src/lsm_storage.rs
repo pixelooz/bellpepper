@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
+#![allow(unused_variables)]
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::mem;
@@ -27,9 +27,7 @@ use bytes::Bytes;
 use parking_lot::{Mutex, MutexGuard, RwLock};
 
 use crate::block::Block;
-use crate::compact::{
-    CompactionController, CompactionOptions, LeveledCc, LeveledCompactionOptions,
-};
+use crate::compact::{CompactionController, CompactionOptions, LeveledCc, LeveledCompOpt};
 use crate::iterators::StorageIterator;
 use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
@@ -66,12 +64,12 @@ pub enum WriteBatchRecord<T: AsRef<[u8]>> {
 
 impl LsmStorageState {
     fn create(options: &LsmStorageOptions) -> Self {
+        use CompactionOptions as Co;
         let levels = match &options.compaction_options {
-            CompactionOptions::Leveled(LeveledCompactionOptions { max_levels, .. }) => (1
-                ..=*max_levels)
+            Co::Leveled(LeveledCompOpt { max_levels, .. }) => (1..=*max_levels)
                 .map(|level| (level, Vec::new()))
                 .collect::<Vec<_>>(),
-            CompactionOptions::NoCompaction => vec![(1, Vec::new())],
+            Co::NoCompaction => vec![(1, Vec::new())],
         };
         Self {
             memtable: Arc::new(MemTable::create(0)),
@@ -162,42 +160,6 @@ impl MiniLsm {
         }))
     }
 
-    pub fn new_txn(&self) -> Result<()> {
-        self.inner.new_txn()
-    }
-
-    pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        self.inner.write_batch(batch)
-    }
-
-    pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
-        self.inner.add_compaction_filter(compaction_filter)
-    }
-
-    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.inner.get(key)
-    }
-
-    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        self.inner.put(key, value)
-    }
-
-    pub fn delete(&self, key: &[u8]) -> Result<()> {
-        self.inner.delete(key)
-    }
-
-    pub fn sync(&self) -> Result<()> {
-        self.inner.sync()
-    }
-
-    pub fn scan(
-        &self,
-        lower: Bound<&[u8]>,
-        upper: Bound<&[u8]>,
-    ) -> Result<FusedIterator<LsmIterator>> {
-        self.inner.scan(lower, upper)
-    }
-
     /// Only call this in test cases due to race conditions
     pub fn force_flush(&self) -> Result<()> {
         if !self.inner.state.read().memtable.is_empty() {
@@ -209,20 +171,12 @@ impl MiniLsm {
         }
         Ok(())
     }
-
-    pub fn force_full_compaction(&self) -> Result<()> {
-        self.inner.force_full_compaction()
-    }
 }
 
 impl LsmStorageInner {
     pub(crate) fn next_sst_id(&self) -> usize {
         self.next_sst_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-    }
-
-    pub(crate) fn mvcc(&self) -> &LsmMvccInner {
-        self.mvcc.as_ref().unwrap()
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -346,22 +300,6 @@ impl LsmStorageInner {
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, key: &[u8]) -> Result<()> {
         self.put(key, b"")
-    }
-
-    pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
-        path.as_ref().join(format!("{:05}.sst", id))
-    }
-
-    pub(crate) fn path_of_sst(&self, id: usize) -> PathBuf {
-        Self::path_of_sst_static(&self.path, id)
-    }
-
-    pub(crate) fn path_of_wal_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
-        path.as_ref().join(format!("{:05}.wal", id))
-    }
-
-    pub(crate) fn path_of_wal(&self, id: usize) -> PathBuf {
-        Self::path_of_wal_static(&self.path, id)
     }
 
     pub(super) fn sync_dir(&self) -> Result<()> {
@@ -537,37 +475,66 @@ fn range_overlap(
     true
 }
 
-impl LsmStorageOptions {
-    pub fn default_for_week1_test() -> Self {
-        Self {
-            block_size: 4096,
-            intended_sst_size: 2 << 20,
-            compaction_options: CompactionOptions::NoCompaction,
-            enable_wal: false,
-            num_memtable_limit: 50,
-            serializable: false,
-        }
+impl MiniLsm {
+    pub fn new_txn(&self) -> Result<()> {
+        self.inner.new_txn()
     }
 
-    pub fn default_for_week1_day6_test() -> Self {
-        Self {
-            block_size: 4096,
-            intended_sst_size: 2 << 20,
-            compaction_options: CompactionOptions::NoCompaction,
-            enable_wal: false,
-            num_memtable_limit: 2,
-            serializable: false,
-        }
+    pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        self.inner.write_batch(batch)
     }
 
-    pub fn default_for_week2_test(compaction_options: CompactionOptions) -> Self {
-        Self {
-            block_size: 4096,
-            intended_sst_size: 1 << 20, // 1MB
-            compaction_options,
-            enable_wal: false,
-            num_memtable_limit: 2,
-            serializable: false,
-        }
+    pub fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+        self.inner.get(key)
+    }
+
+    pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
+        self.inner.put(key, value)
+    }
+
+    pub fn delete(&self, key: &[u8]) -> Result<()> {
+        self.inner.delete(key)
+    }
+
+    pub fn sync(&self) -> Result<()> {
+        self.inner.sync()
+    }
+
+    pub fn scan(
+        &self,
+        lower: Bound<&[u8]>,
+        upper: Bound<&[u8]>,
+    ) -> Result<FusedIterator<LsmIterator>> {
+        self.inner.scan(lower, upper)
+    }
+
+    pub fn force_full_compaction(&self) -> Result<()> {
+        self.inner.force_full_compaction()
+    }
+
+    pub fn add_compaction_filter(&self, compaction_filter: CompactionFilter) {
+        self.inner.add_compaction_filter(compaction_filter)
+    }
+}
+
+impl LsmStorageInner {
+    pub(crate) fn mvcc(&self) -> &LsmMvccInner {
+        self.mvcc.as_ref().unwrap()
+    }
+
+    pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
+        path.as_ref().join(format!("{:05}.sst", id))
+    }
+
+    pub(crate) fn path_of_sst(&self, id: usize) -> PathBuf {
+        Self::path_of_sst_static(&self.path, id)
+    }
+
+    pub(crate) fn path_of_wal(&self, id: usize) -> PathBuf {
+        Self::path_of_wal_static(&self.path, id)
+    }
+
+    pub(crate) fn path_of_wal_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
+        path.as_ref().join(format!("{:05}.wal", id))
     }
 }

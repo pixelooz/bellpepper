@@ -27,7 +27,7 @@ use anyhow::{Result, bail};
 use bytes::Bytes;
 
 use crate::{
-    compact::{CompactionOptions, LeveledCompactionOptions},
+    compact::{CompactionOptions, LeveledCompOpt},
     iterators::{StorageIterator, merge_iterator::MergeIterator},
     key::{KeySlice, TS_ENABLED},
     lsm_storage::{BlockCache, LsmStorageInner, LsmStorageState, MiniLsm},
@@ -333,7 +333,7 @@ pub fn check_compaction_ratio(storage: Arc<MiniLsm>) {
     let num_memtables = storage.inner.state.read().imm_memtables.len() + 1;
     match compaction_options {
         CompactionOptions::NoCompaction => unreachable!(),
-        CompactionOptions::Leveled(LeveledCompactionOptions {
+        CompactionOptions::Leveled(LeveledCompOpt {
             level_size_multiplier,
             level0_file_num_compaction_trigger,
             max_levels,
