@@ -35,7 +35,7 @@ use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{MemTable, map_bound};
 use crate::mvcc::LsmMvccInner;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
@@ -136,11 +136,29 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
+        self.compaction_notifier.send(()).ok();
         self.flush_notifier.send(()).ok();
         let mut flush_thread = self.flush_thread.lock();
         if let Some(flush_thread) = flush_thread.take() {
             flush_thread.join().map_err(|err| anyhow!("{:?}", err))?;
         }
+        let mut compaction_thread = self.compaction_thread.lock();
+        if let Some(compaction_thread) = compaction_thread.take() {
+            compaction_thread
+                .join()
+                .map_err(|err| anyhow!("{:?}", err))?;
+        }
+        if !self.inner.state.read().memtable.is_empty() {
+            self.inner
+                .replace_memtable(Arc::new(MemTable::create(self.inner.next_sst_id())))?;
+        }
+        while {
+            let state = self.inner.state.read();
+            !state.imm_memtables.is_empty()
+        } {
+            self.inner.force_flush_next_imm_memtable()?;
+        }
+        self.inner.sync_dir()?;
         Ok(())
     }
 
@@ -323,11 +341,21 @@ impl LsmStorageInner {
     pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
         let next_sst_id = self.next_sst_id();
         let new_memtable = Arc::new(MemTable::create(next_sst_id));
+        self.replace_memtable(new_memtable)?;
+        self.manifest.as_ref().unwrap().add_record(
+            _state_lock_observer,
+            ManifestRecord::NewMemtable(next_sst_id),
+        )?;
+        Ok(())
+    }
+
+    fn replace_memtable(&self, new_memtable: Arc<MemTable>) -> Result<()> {
         let mut state_guard = self.state.write();
         let mut snapshot = state_guard.as_ref().clone();
         let old_memtable = mem::replace(&mut snapshot.memtable, new_memtable);
         snapshot.imm_memtables.insert(0, old_memtable);
         *state_guard = Arc::new(snapshot);
+        drop(state_guard);
         Ok(())
     }
 
@@ -344,12 +372,16 @@ impl LsmStorageInner {
         };
         let mut builder = SsTableBuilder::new(self.options.block_size);
         flush_memtable.flush(&mut builder)?;
-        let sst_id = flush_memtable.id();
+        let memtable_id = flush_memtable.id();
         let sst = Arc::new(builder.build(
-            sst_id,
+            memtable_id,
             Some(self.block_cache.clone()),
-            self.path_of_sst(sst_id),
+            self.path_of_sst(memtable_id),
         )?);
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&_state_lock, ManifestRecord::Flush(memtable_id))?;
         let mut state_guard = self.state.write();
         let mut snapshot = state_guard.as_ref().clone();
         let popped = snapshot
@@ -357,12 +389,13 @@ impl LsmStorageInner {
             .pop()
             .expect("should've been returned for empty");
         assert!(
-            sst_id == popped.id(),
+            memtable_id == popped.id(),
             "last memtable changed while holding state_lock"
         );
-        snapshot.l0_ss_tables.insert(0, sst_id);
-        snapshot.ss_tables.insert(sst_id, sst);
+        snapshot.l0_ss_tables.insert(0, memtable_id);
+        snapshot.ss_tables.insert(memtable_id, sst);
         *state_guard = Arc::new(snapshot);
+        self.sync_dir()?;
         Ok(())
     }
 

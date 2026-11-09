@@ -32,6 +32,7 @@ use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -187,7 +188,7 @@ impl LsmStorageInner {
             l1_ss_tables: l1_ss_tables.clone(),
         };
         let new_ssts = self.compact(&task)?;
-        let _state_guard = self.state_lock.lock();
+        let _state_lock = self.state_lock.lock();
         let mut snapshot = self.state.read().as_ref().clone();
         for sst_id in l0_ss_tables.iter().chain(l1_ss_tables.iter()) {
             let removed = snapshot.ss_tables.remove(sst_id);
@@ -206,7 +207,12 @@ impl LsmStorageInner {
         snapshot.l0_ss_tables.retain(|id| !l0_sst_set.remove(id));
         assert!(l0_sst_set.is_empty());
         *self.state.write() = Arc::new(snapshot);
-        drop(_state_guard);
+        self.sync_dir()?;
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&_state_lock, ManifestRecord::Compaction(task, new_ids))?;
+        drop(_state_lock);
         for sst_id in l0_ss_tables.iter().chain(l1_ss_tables) {
             std::fs::remove_file(self.path_of_sst(*sst_id))?;
         }
@@ -218,15 +224,15 @@ impl LsmStorageInner {
             let state = self.state.read();
             Arc::clone(&state)
         };
-        let Some(compaction_task) = self
+        let Some(task) = self
             .compaction_controller
             .generate_compaction_task(&snapshot)
         else {
             return Ok(());
         };
-        let new_ssts = self.compact(&compaction_task)?;
-        let output = new_ssts.iter().map(|sst| sst.sst_id()).collect::<Vec<_>>();
-        let _state_guard = self.state_lock.lock();
+        let new_ssts = self.compact(&task)?;
+        let new_sst_ids = new_ssts.iter().map(|sst| sst.sst_id()).collect::<Vec<_>>();
+        let _state_lock = self.state_lock.lock();
         let mut snapshot = self.state.read().as_ref().clone();
         for sst in new_ssts {
             let prev = snapshot.ss_tables.insert(sst.sst_id(), sst);
@@ -234,19 +240,22 @@ impl LsmStorageInner {
         }
         let (mut snapshot, sst_ids_to_remove) = self.compaction_controller.apply_compaction_result(
             &snapshot,
-            &compaction_task,
-            &output,
+            &task,
+            &new_sst_ids,
             false,
         );
-        let mut ids_to_remove = Vec::with_capacity(sst_ids_to_remove.len());
-        for sst_id in sst_ids_to_remove {
-            let prev = snapshot.ss_tables.remove(&sst_id);
+        for sst_id in &sst_ids_to_remove {
+            let prev = snapshot.ss_tables.remove(sst_id);
             assert!(prev.is_some());
-            ids_to_remove.push(prev.unwrap().sst_id());
         }
         *self.state.write() = Arc::new(snapshot);
-        drop(_state_guard);
-        for sst_id in ids_to_remove {
+        self.sync_dir()?;
+        self.manifest
+            .as_ref()
+            .unwrap()
+            .add_record(&_state_lock, ManifestRecord::Compaction(task, new_sst_ids))?;
+        drop(_state_lock);
+        for sst_id in sst_ids_to_remove {
             std::fs::remove_file(self.path_of_sst(sst_id))?;
         }
         self.sync_dir()?;
@@ -333,12 +342,12 @@ impl CompactionController {
         &self,
         snapshot: &LsmStorageState,
         task: &CompactionTask,
-        output: &[usize],
+        new_sst_ids: &[usize],
         in_recovery: bool,
     ) -> (LsmStorageState, Vec<usize>) {
         match (self, task) {
             (CompactionController::Leveled(ctrl), CompactionTask::Leveled(task)) => {
-                ctrl.apply_compaction_result(snapshot, task, output, in_recovery)
+                ctrl.apply_compaction_result(snapshot, task, new_sst_ids, in_recovery)
             }
             _ => unreachable!(),
         }

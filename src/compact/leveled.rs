@@ -134,7 +134,7 @@ impl LeveledCc {
         &self,
         snapshot: &LsmStorageState,
         task: &LeveledCompactionTask,
-        output: &[usize],
+        new_sst_ids: &[usize],
         in_recovery: bool,
     ) -> (LsmStorageState, Vec<usize>) {
         let mut snapshot = snapshot.clone();
@@ -170,7 +170,7 @@ impl LeveledCc {
         let lower_level_sst_ids = &mut snapshot.levels[task.lower_level - 1].1;
         lower_level_sst_ids.retain(|id| !lower_level_sst_id_set.remove(id));
         assert!(lower_level_sst_id_set.is_empty());
-        lower_level_sst_ids.extend(output);
+        lower_level_sst_ids.extend(new_sst_ids);
         if !in_recovery {
             lower_level_sst_ids.sort_by(|a, b| {
                 snapshot.ss_tables[a]

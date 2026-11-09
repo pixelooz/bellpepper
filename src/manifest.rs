@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)]
-#![allow(dead_code)]
-
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
