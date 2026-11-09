@@ -243,10 +243,9 @@ impl LsmStorageInner {
                 if let Some(bloom) = &table.bloom {
                     return bloom.may_contain(farmhash::fingerprint32(key));
                 }
-                true
-            } else {
-                false
+                return true;
             }
+            false
         };
         let mut l0_iters = Vec::with_capacity(snapshot.l0_ss_tables.len());
         for table_id in &snapshot.l0_ss_tables {
