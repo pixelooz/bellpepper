@@ -151,18 +151,17 @@ impl LsmStorageInner {
                     }
                     let upper_iter = SstConcatIterator::create_and_seek_to_first(upper_ssts)?;
                     let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
-                    self.generate_sst_from_iter(iter, *is_lower_level_bottom_level)
-                } else {
-                    let mut upper_ssts = Vec::with_capacity(snapshot.l0_ss_tables.len());
-                    for sst_id in &snapshot.l0_ss_tables {
-                        let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
-                        let iter = SsTableIterator::create_and_seek_to_first(sst)?;
-                        upper_ssts.push(Box::new(iter));
-                    }
-                    let upper_iter = MergeIterator::create(upper_ssts);
-                    let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
-                    self.generate_sst_from_iter(iter, *is_lower_level_bottom_level)
+                    return self.generate_sst_from_iter(iter, *is_lower_level_bottom_level);
                 }
+                let mut upper_ssts = Vec::with_capacity(snapshot.l0_ss_tables.len());
+                for sst_id in &snapshot.l0_ss_tables {
+                    let sst = Arc::clone(&snapshot.ss_tables[sst_id]);
+                    let iter = SsTableIterator::create_and_seek_to_first(sst)?;
+                    upper_ssts.push(Box::new(iter));
+                }
+                let upper_iter = MergeIterator::create(upper_ssts);
+                let iter = TwoMergeIterator::create(upper_iter, lower_iter)?;
+                self.generate_sst_from_iter(iter, *is_lower_level_bottom_level)
             }
         }
     }
