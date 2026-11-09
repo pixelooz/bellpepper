@@ -321,12 +321,11 @@ impl CompactionController {
     }
 
     pub fn generate_compaction_task(&self, snapshot: &LsmStorageState) -> Option<CompactionTask> {
-        use CompactionController as Cc;
         match self {
-            Cc::Leveled(ctrl) => ctrl
+            CompactionController::Leveled(ctrl) => ctrl
                 .generate_compaction_task(snapshot)
                 .map(CompactionTask::Leveled),
-            Cc::NoCompaction => unreachable!(),
+            CompactionController::NoCompaction => unreachable!(),
         }
     }
 
@@ -337,9 +336,8 @@ impl CompactionController {
         output: &[usize],
         in_recovery: bool,
     ) -> (LsmStorageState, Vec<usize>) {
-        use CompactionController as Cc;
         match (self, task) {
-            (Cc::Leveled(ctrl), CompactionTask::Leveled(task)) => {
+            (CompactionController::Leveled(ctrl), CompactionTask::Leveled(task)) => {
                 ctrl.apply_compaction_result(snapshot, task, output, in_recovery)
             }
             _ => unreachable!(),
