@@ -79,15 +79,15 @@ impl LeveledCc {
         let max_level = self.options.max_levels;
         // The sizes are stored on 1 based indexing, not zero, so arr[0] will be zero for both.
         let mut target_level_size = vec![0usize; max_level + 1];
-        let mut real_level_size = Vec::with_capacity(max_level + 1);
-        for (_, sst_ids) in &snapshot.levels {
+        let mut real_level_size = vec![0usize; max_level + 1];
+        for (level, sst_ids) in &snapshot.levels {
             let real_size = sst_ids
                 .iter()
                 .map(|id| snapshot.ss_tables[id].table_size())
                 .sum::<u64>();
-            real_level_size.push(usize::try_from(real_size).unwrap());
+            real_level_size[*level] = usize::try_from(real_size).unwrap();
         }
-        target_level_size[max_level - 1] = real_level_size[max_level - 1].max(base_level_size);
+        target_level_size[max_level] = real_level_size[max_level].max(base_level_size);
         let mut base_level = max_level;
         for level in (1..max_level).rev() {
             let next_level_target = target_level_size[level + 1];
@@ -149,9 +149,9 @@ impl LeveledCc {
             .copied()
             .collect::<HashSet<_>>();
 
-        let mut files_to_remove = Vec::<usize>::new();
-        files_to_remove.extend(&task.lower_level_sst_ids);
-        files_to_remove.extend(&task.upper_level_sst_ids);
+        let mut sst_ids_to_remove = Vec::<usize>::new();
+        sst_ids_to_remove.extend(&task.lower_level_sst_ids);
+        sst_ids_to_remove.extend(&task.upper_level_sst_ids);
 
         match task.upper_level {
             Some(upper_level) => {
@@ -178,6 +178,6 @@ impl LeveledCc {
                     .cmp(snapshot.ss_tables[b].first_key())
             });
         }
-        (snapshot, files_to_remove)
+        (snapshot, sst_ids_to_remove)
     }
 }

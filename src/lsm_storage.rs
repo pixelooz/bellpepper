@@ -16,6 +16,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::fs::File;
 use std::mem;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -303,7 +304,8 @@ impl LsmStorageInner {
     }
 
     pub(super) fn sync_dir(&self) -> Result<()> {
-        unimplemented!()
+        File::open(&self.path)?.sync_all()?;
+        Ok(())
     }
 
     fn try_freeze(&self, estimated_size: usize) -> Result<()> {
