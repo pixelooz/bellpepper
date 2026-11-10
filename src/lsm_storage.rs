@@ -215,11 +215,11 @@ impl LsmStorageInner {
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
         let manifest_path = path.join("MANIFEST");
-        let mut manifest;
+        let manifest;
         if !manifest_path.exists() {
             manifest = Some(Manifest::create(manifest_path)?);
             manifest
-                .as_mut()
+                .as_ref()
                 .unwrap()
                 .add_record_when_init(ManifestRecord::NewMemtable(state.memtable.id()))?;
         } else {
