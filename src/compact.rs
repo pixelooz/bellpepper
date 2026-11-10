@@ -324,11 +324,8 @@ impl CompactionTask {
     }
 }
 
+// TODO: redundant methods now that tiered has been removed, refactor accordingly.
 impl CompactionController {
-    pub fn flush_to_l0(&self) -> bool {
-        matches!(self, Self::Leveled(_) | Self::NoCompaction)
-    }
-
     pub fn generate_compaction_task(&self, snapshot: &LsmStorageState) -> Option<CompactionTask> {
         match self {
             CompactionController::Leveled(ctrl) => ctrl
