@@ -42,9 +42,8 @@ impl Manifest {
             .read(true)
             .write(true)
             .open(path)?;
-        Ok(Self {
-            file: Arc::new(Mutex::new(file)),
-        })
+        let file = Arc::new(Mutex::new(file));
+        Ok(Self { file })
     }
 
     pub fn recover(path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
@@ -78,19 +77,11 @@ impl Manifest {
             file.set_len(u64::try_from(valid_len).unwrap())?;
             file.sync_all()?;
         }
-        Ok((
-            Self {
-                file: Arc::new(Mutex::new(file)),
-            },
-            records,
-        ))
+        let file = Arc::new(Mutex::new(file));
+        Ok((Self { file }, records))
     }
 
-    pub fn add_record(
-        &self,
-        _state_lock_observer: &MutexGuard<()>,
-        record: ManifestRecord,
-    ) -> Result<()> {
+    pub fn add_record(&self, _state_lock: &MutexGuard<()>, record: ManifestRecord) -> Result<()> {
         self.add_record_when_init(record)
     }
 
