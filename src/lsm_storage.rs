@@ -251,7 +251,7 @@ impl LsmStorageInner {
                 .iter()
                 .chain(state.levels.iter().flat_map(|(_, sst_ids)| sst_ids))
             {
-                let file = FileObject::open(path)?;
+                let file = FileObject::open(&Self::path_of_sst_static(path, sst_id))?;
                 let ss_table = SsTable::open(sst_id, Some(Arc::clone(&block_cache)), file)?;
                 state.ss_tables.insert(sst_id, Arc::new(ss_table));
             }

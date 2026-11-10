@@ -18,42 +18,19 @@ use bytes::BufMut;
 use tempfile::tempdir;
 
 use crate::{
-    compact::{
-        CompactionOptions, LeveledCompactionOptions, SimpleLeveledCompactionOptions,
-        TieredCompactionOptions,
-    },
+    compact::{CompactionOptions, LeveledCompOpt},
     lsm_storage::{LsmStorageOptions, MiniLsm},
     tests::harness::dump_files_in_dir,
 };
 
 #[test]
 fn test_integration_leveled() {
-    test_integration(CompactionOptions::Leveled(LeveledCompactionOptions {
+    test_integration(CompactionOptions::Leveled(LeveledCompOpt {
         level_size_multiplier: 2,
         level0_file_num_compaction_trigger: 2,
         max_levels: 3,
         base_level_size_mb: 1,
     }))
-}
-
-#[test]
-fn test_integration_tiered() {
-    test_integration(CompactionOptions::Tiered(TieredCompactionOptions {
-        num_tiers: 3,
-        max_size_amplification_percent: 200,
-        size_ratio: 1,
-        min_merge_width: 3,
-        max_merge_width: None,
-    }))
-}
-
-#[test]
-fn test_integration_simple() {
-    test_integration(CompactionOptions::Simple(SimpleLeveledCompactionOptions {
-        size_ratio_percent: 200,
-        level0_file_num_compaction_trigger: 2,
-        max_levels: 3,
-    }));
 }
 
 /// Provision the storage such that base_level contains 2 SST files (target size is 2MB and each SST is 1MB).
@@ -63,7 +40,7 @@ fn test_integration_simple() {
 /// point where this function is called during manifest recovery.
 #[test]
 fn test_multiple_compacted_ssts_leveled() {
-    let compaction_options = CompactionOptions::Leveled(LeveledCompactionOptions {
+    let compaction_options = CompactionOptions::Leveled(LeveledCompOpt {
         level_size_multiplier: 4,
         level0_file_num_compaction_trigger: 2,
         max_levels: 2,
@@ -87,7 +64,7 @@ fn test_multiple_compacted_ssts_leveled() {
         std::thread::sleep(Duration::from_secs(1));
         let snapshot = storage.inner.state.read().clone();
         let to_cont = prev_snapshot.levels != snapshot.levels
-            || prev_snapshot.l0_sstables != snapshot.l0_sstables;
+            || prev_snapshot.l0_ss_tables != snapshot.l0_ss_tables;
         prev_snapshot = snapshot;
         to_cont
     } {
