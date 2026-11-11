@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)]
-#![allow(dead_code)]
-
 mod leveled;
 
 use std::collections::HashSet;
@@ -89,7 +86,7 @@ impl LsmStorageInner {
             CompactionTask::Leveled(LeveledCompactionTask {
                 upper_level,
                 upper_level_sst_ids,
-                lower_level,
+                lower_level: _,
                 lower_level_sst_ids,
                 is_lower_level_bottom_level,
             }) => {
@@ -312,15 +309,6 @@ impl LsmStorageInner {
             }
         });
         Ok(Some(handle))
-    }
-}
-
-impl CompactionTask {
-    fn compact_to_bottom_level(&self) -> bool {
-        match self {
-            CompactionTask::ForceFullCompaction { .. } => true,
-            CompactionTask::Leveled(task) => task.is_lower_level_bottom_level,
-        }
     }
 }
 

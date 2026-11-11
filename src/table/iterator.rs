@@ -67,7 +67,7 @@ impl SsTableIterator {
         Ok(Self {
             table,
             block_iter,
-            block_idx: 0,
+            block_idx,
         })
     }
 
