@@ -387,25 +387,63 @@ impl LsmStorageInner {
     }
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
-    pub fn write_batch<T: AsRef<[u8]>>(&self, _batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        unimplemented!()
+    pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        self.validate_batch(batch)?;
+        for record in batch {
+            match record {
+                WriteBatchRecord::Put(key, value) => {
+                    let key = key.as_ref();
+                    let value = value.as_ref();
+                    assert!(!key.is_empty(), "key cannot be empty");
+                    assert!(!value.is_empty(), "key cannot be empty");
+                    let size = {
+                        let guard = self.state.read();
+                        guard.memtable.put(key, value)?;
+                        guard.memtable.approximate_size()
+                    };
+                    self.try_freeze(size)?;
+                }
+                WriteBatchRecord::Del(key) => {
+                    let key = key.as_ref();
+                    assert!(!key.is_empty(), "key cannot be empty");
+                    let size = {
+                        let guard = self.state.read();
+                        guard.memtable.put(key, b"")?;
+                        guard.memtable.approximate_size()
+                    };
+                    self.try_freeze(size)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        for record in batch {
+            let (key, value) = match record {
+                WriteBatchRecord::Put(key, value) => (key.as_ref(), value.as_ref()),
+                WriteBatchRecord::Del(key) => (key.as_ref(), [].as_ref()),
+            };
+            ensure!(
+                u16::try_from(key.len()).is_ok(),
+                "key too large for on disk format"
+            );
+            ensure!(
+                u16::try_from(value.len()).is_ok(),
+                "value too large for on disk format"
+            );
+        }
+        Ok(())
     }
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
-        ensure!(!key.is_empty(), "key cannot be empty");
-        let estimated_size = {
-            let guard = self.state.read();
-            guard.memtable.put(key, value)?;
-            guard.memtable.approximate_size()
-        };
-        self.try_freeze(estimated_size)?;
-        Ok(())
+        self.write_batch(&[WriteBatchRecord::Put(key, value)])
     }
 
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, key: &[u8]) -> Result<()> {
-        self.put(key, b"")
+        self.write_batch(&[WriteBatchRecord::Del(key)])
     }
 
     pub(super) fn sync_dir(&self) -> Result<()> {

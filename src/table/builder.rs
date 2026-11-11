@@ -85,7 +85,9 @@ impl SsTableBuilder {
             first_key: mem::take(&mut self.first_key).into_key_bytes(),
             last_key: mem::take(&mut self.last_key).into_key_bytes(),
         });
+        let checksum = crc32fast::hash(&encoded);
         self.data.extend(encoded);
+        self.data.put_u32(checksum);
     }
 
     /// Get the estimated size of the SSTable.

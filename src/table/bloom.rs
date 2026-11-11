@@ -16,8 +16,8 @@
 
 use std::cmp;
 
-use anyhow::Result;
-use bytes::{BufMut, Bytes, BytesMut};
+use anyhow::{Result, ensure};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 /// Implements a bloom filter
 pub struct Bloom {
@@ -62,9 +62,16 @@ impl<T: AsMut<[u8]>> BitSliceMut for T {
 
 impl Bloom {
     /// Decode a bloom filter
-    pub fn decode(buf: &[u8]) -> Result<Self> {
-        let filter = &buf[..buf.len() - 1];
-        let k = buf[buf.len() - 1];
+    pub fn decode(buffer: &[u8]) -> Result<Self> {
+        let checksum_offset = buffer.len() - 4;
+        let checksum = (&buffer[checksum_offset..]).get_u32();
+        ensure!(
+            crc32fast::hash(&buffer[..checksum_offset]) == checksum,
+            "checksum mismatched for bloom filters"
+        );
+        let filter = &buffer[..buffer.len() - 5];
+        ensure!(!filter.is_empty(), "bloom filter has no bits");
+        let k = buffer[buffer.len() - 5];
         Ok(Self {
             filter: filter.to_vec().into(),
             k,
@@ -72,9 +79,12 @@ impl Bloom {
     }
 
     /// Encode a bloom filter
-    pub fn encode(&self, buf: &mut Vec<u8>) {
-        buf.extend(&self.filter);
-        buf.put_u8(self.k);
+    pub fn encode(&self, buffer: &mut Vec<u8>) {
+        let offset = buffer.len();
+        buffer.extend(&self.filter);
+        buffer.put_u8(self.k);
+        let checksum = crc32fast::hash(&buffer[offset..]);
+        buffer.put_u32(checksum);
     }
 
     /// Get bloom filter bits per key from entries count and FPR
