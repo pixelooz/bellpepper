@@ -10,6 +10,8 @@ and how RocksDB's dynamic leveled compaction actually bounds write and space amp
 
 ## Architecture & What's Inside
 
+![Architecture](assets/architecture.svg)
+
 ### 1. MemTable & Manual Self-Referential Iteration
 - Active writes go into a lock-free `crossbeam_skiplist::SkipMap<Bytes, Bytes>` paired with an append-only Write-Ahead Log (`WAL`).
 - Once the active MemTable crosses the target size limit (`target_sst_size`), it is frozen into an immutable list (`imm_memtables`) and flushed to `L0` by a 
