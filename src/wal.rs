@@ -42,26 +42,22 @@ impl Wal {
 
     /// Week 2 Day 6: recover entries from a write-ahead log.
     pub fn recover(path: impl AsRef<Path>, skiplist: &SkipMap<Bytes, Bytes>) -> Result<Self> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .read(true)
-            .open(path)?;
+        let mut file = OpenOptions::new().append(true).read(true).open(path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
         let mut rbuf = buffer.as_slice();
         while rbuf.has_remaining() {
-            let len_before = rbuf.len();
+            let snapshot = rbuf;
             let key_len = usize::from(rbuf.get_u16());
             let key = Bytes::copy_from_slice(&rbuf[..key_len]);
             rbuf.advance(key_len);
             let value_len = usize::from(rbuf.get_u16());
             let value = Bytes::copy_from_slice(&rbuf[..value_len]);
             rbuf.advance(value_len);
-            let payload = len_before - rbuf.len();
+            let payload = snapshot.len() - rbuf.len();
             let checksum = rbuf.get_u32();
             ensure!(
-                crc32fast::hash(&rbuf[..payload]) == checksum,
+                crc32fast::hash(&snapshot[..payload]) == checksum,
                 "Wal checksum mismatch"
             );
             skiplist.insert(key, value);
